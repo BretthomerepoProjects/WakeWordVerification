@@ -85,22 +85,26 @@ func (c *Client) WakePipeline(ctx context.Context, mac string, slot int) (string
 	return "", errors.New("hass: selected wake pipeline is unavailable")
 }
 
+// ErrSTTNoText means Home Assistant ran STT but no words were recognized.
+var ErrSTTNoText = errors.New("hass: STT recognized no text")
+
 // Transcribe sends a finite mono PCM clip through just the STT stage of an
 // existing Assist pipeline. The caller supplies 16-bit little-endian samples
-// and a deadline. No intent or TTS stage runs.
-func (c *Client) Transcribe(ctx context.Context, pipeline string, sampleRate int, pcm []byte) (string, error) {
+// and a deadline. It reports whether the pipeline request was sent, even if
+// the run later fails. No intent or TTS stage runs.
+func (c *Client) Transcribe(ctx context.Context, pipeline string, sampleRate int, pcm []byte) (text string, requested bool, err error) {
 	if pipeline == "" {
-		return "", errors.New("hass: STT pipeline is required")
+		return "", false, errors.New("hass: STT pipeline is required")
 	}
 	if sampleRate <= 0 || len(pcm) == 0 || len(pcm)%2 != 0 {
-		return "", errors.New("hass: invalid STT audio")
+		return "", false, errors.New("hass: invalid STT audio")
 	}
 	if _, ok := ctx.Deadline(); !ok {
-		return "", errors.New("hass: STT deadline is required")
+		return "", false, errors.New("hass: STT deadline is required")
 	}
 	s, err := c.wsOpen(ctx)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer s.conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = s.conn.Close() })
@@ -115,7 +119,7 @@ func (c *Client) Transcribe(ctx context.Context, pipeline string, sampleRate int
 		"end_stage":   "stt",
 		"input":       map[string]int{"sample_rate": sampleRate},
 	}); err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	sent := false
@@ -142,35 +146,38 @@ func (c *Client) Transcribe(ctx context.Context, pipeline string, sampleRate int
 		}
 		if err := s.conn.ReadJSON(&msg); err != nil {
 			if ctx.Err() != nil {
-				return "", ctx.Err()
+				return "", true, ctx.Err()
 			}
-			return "", err
+			return "", true, err
 		}
 		if msg.ID != id {
 			continue
 		}
 		if msg.Type == "result" && !msg.Success {
-			return "", fmt.Errorf("hass: STT request rejected: %s", msg.Error.Code)
+			return "", true, fmt.Errorf("hass: STT request rejected: %s", msg.Error.Code)
 		}
 		switch msg.Event.Type {
 		case "run-start":
 			handler := msg.Event.Data.RunnerData.Handler
 			if handler == nil || sent {
-				return "", errors.New("hass: invalid STT audio handler")
+				return "", true, errors.New("hass: invalid STT audio handler")
 			}
 			if err := sendSTTClip(s.conn, *handler, pcm); err != nil {
-				return "", err
+				return "", true, err
 			}
 			sent = true
 		case "stt-end":
 			if !sent {
-				return "", errors.New("hass: STT ended before audio was sent")
+				return "", true, errors.New("hass: STT ended before audio was sent")
 			}
-			return msg.Event.Data.Output.Text, nil
+			return msg.Event.Data.Output.Text, true, nil
 		case "error":
-			return "", fmt.Errorf("hass: STT failed: %s", msg.Event.Data.Code)
+			if sent && msg.Event.Data.Code == "stt-no-text-recognized" {
+				return "", true, ErrSTTNoText
+			}
+			return "", true, fmt.Errorf("hass: STT failed: %s", msg.Event.Data.Code)
 		case "run-end":
-			return "", errors.New("hass: STT ended without a transcript")
+			return "", true, errors.New("hass: STT ended without a transcript")
 		}
 	}
 }

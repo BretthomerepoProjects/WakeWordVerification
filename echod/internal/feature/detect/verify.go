@@ -3,6 +3,7 @@ package detect
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -63,12 +64,24 @@ func (d *Detect) verifyWake(slot int) {
 		slog.Debug("wake verification could not resolve the Assist pipeline", "err", err)
 		return
 	}
-	transcript, err := hass.Get().Transcribe(check, pipeline, mic.Rate, pcm)
+	transcript, sent, err := hass.Get().Transcribe(check, pipeline, mic.Rate, pcm)
+	allowed := err == nil && matchesWakePhrase(transcript, model.Phrase)
+	blocked := err == nil && !allowed || errors.Is(err, hass.ErrSTTNoText)
+	if sent {
+		// Persist after the wake handoff so writing the totals cannot delay the chime.
+		defer func() {
+			counts, saveErr := config.Set().OnHA().RecordSTTWake(allowed, blocked)
+			if saveErr != nil {
+				slog.Error("saving wake STT counters failed", "err", saveErr)
+			}
+			d.onHA.publishSTTWakes(counts)
+		}()
+	}
 	if err != nil {
 		slog.Debug("wake verification STT failed", "err", err)
 		return
 	}
-	if check.Err() != nil || !matchesWakePhrase(transcript, model.Phrase) {
+	if check.Err() != nil || !allowed {
 		return
 	}
 	current, ok := d.engine.Loaded(slot)

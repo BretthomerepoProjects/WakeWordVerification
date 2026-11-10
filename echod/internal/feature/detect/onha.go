@@ -18,10 +18,16 @@ type onHAEntities struct {
 	stream    *esphome.Switch
 	confirm   *esphome.Switch
 	threshold *esphome.Number
+	sttSent   *esphome.Sensor
+	sttAllow  *esphome.Sensor
+	sttBlock  *esphome.Sensor
 }
 
 func newOnHAEntities(cancelVerification func()) onHAEntities {
 	o := onHAEntities{
+		sttSent:  newSTTWakeCounter("wake_stt_requests_sent", "Wake STT requests sent", "mdi:microphone-message"),
+		sttAllow: newSTTWakeCounter("wake_stt_allowed", "Wake STT allowed", "mdi:check-circle-outline"),
+		sttBlock: newSTTWakeCounter("wake_stt_blocked", "Wake STT blocked", "mdi:close-circle-outline"),
 		verify: &esphome.Switch{
 			Base: esphome.Base{
 				ObjectID: "always_verify_with_stt",
@@ -100,9 +106,23 @@ func newOnHAEntities(cancelVerification func()) onHAEntities {
 
 func (o onHAEntities) restore(c config.OnHA) {
 	o.verify.Set(c.VerifySTT)
+	o.publishSTTWakes(c.STTWakes)
 	o.stream.Set(c.Stream)
 	o.confirm.Set(c.Confirm)
 	o.threshold.Set(float32(c.ConfirmAt()))
 	slog.Info("restored", "what", "wake word on home assistant", "stream", c.Stream, "confirm", c.Confirm,
 		"confirm_threshold", c.ConfirmAt())
+}
+
+func newSTTWakeCounter(id, name, icon string) *esphome.Sensor {
+	return &esphome.Sensor{
+		Base:       esphome.Base{ObjectID: id, Name: name, Icon: icon},
+		StateClass: esphome.StateClassTotalIncreasing,
+	}
+}
+
+func (o onHAEntities) publishSTTWakes(counts config.STTWakeCounts) {
+	o.sttSent.Set(float32(counts.Sent))
+	o.sttAllow.Set(float32(counts.Allowed))
+	o.sttBlock.Set(float32(counts.Blocked))
 }

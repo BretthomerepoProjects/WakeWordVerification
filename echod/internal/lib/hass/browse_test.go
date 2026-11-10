@@ -3,6 +3,7 @@ package hass
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -71,7 +72,8 @@ func fakeHA(t *testing.T, token string) *httptest.Server {
 					{"id": "preferred-id", "name": "Preferred"},
 					{"id": "spot-id", "name": "Spot Voice"},
 				}}})
-		case cmd["type"] == "assist_pipeline/run" && cmd["pipeline"] == "wake-test" &&
+		case cmd["type"] == "assist_pipeline/run" &&
+			(cmd["pipeline"] == "wake-test" || cmd["pipeline"] == "no-text") &&
 			cmd["start_stage"] == "stt" && cmd["end_stage"] == "stt":
 			event := func(kind string, data map[string]any) error {
 				return c.WriteJSON(map[string]any{"id": cmd["id"], "type": "event",
@@ -91,6 +93,12 @@ func fakeHA(t *testing.T, token string) *httptest.Server {
 					t.Errorf("STT audio frame = %v, %v, %v; want %v", kind, got, err, want)
 					return
 				}
+			}
+			if cmd["pipeline"] == "no-text" {
+				if err := event("error", map[string]any{"code": "stt-no-text-recognized"}); err != nil {
+					t.Error(err)
+				}
+				return
 			}
 			if err := event("stt-end", map[string]any{"stt_output": map[string]string{"text": "Alexa"}}); err != nil {
 				t.Error(err)
@@ -122,12 +130,19 @@ func TestTranscribeOnly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	got, err := c.Transcribe(ctx, "wake-test", 16000, []byte{1, 0, 2, 0})
-	if err != nil || got != "Alexa" {
-		t.Fatalf("Transcribe = %q, %v; want Alexa", got, err)
+	got, sent, err := c.Transcribe(ctx, "wake-test", 16000, []byte{1, 0, 2, 0})
+	if err != nil || !sent || got != "Alexa" {
+		t.Fatalf("Transcribe = %q, %v, %v; want Alexa and a sent request", got, sent, err)
 	}
-	if _, err := c.Transcribe(ctx, "wrong-pipeline", 16000, []byte{1, 0}); err == nil {
-		t.Error("failed STT request reported success")
+	if _, sent, err := c.Transcribe(ctx, "no-text", 16000, []byte{1, 0, 2, 0}); !sent || !errors.Is(err, ErrSTTNoText) {
+		t.Errorf("no-text result = sent %v, err %v", sent, err)
+	}
+	if _, sent, err := c.Transcribe(ctx, "wrong-pipeline", 16000, []byte{1, 0}); !sent || err == nil || errors.Is(err, ErrSTTNoText) {
+		t.Errorf("rejected pipeline request = sent %v, err %v", sent, err)
+	}
+	bad := &Client{acc: access{URL: srv.URL, Token: "wrong"}}
+	if _, sent, err := bad.Transcribe(ctx, "wake-test", 16000, []byte{1, 0}); sent || err == nil {
+		t.Errorf("unauthenticated pipeline request = sent %v, err %v", sent, err)
 	}
 }
 

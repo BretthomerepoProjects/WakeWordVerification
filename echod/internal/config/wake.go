@@ -45,6 +45,8 @@ type OnHA struct {
 	// VerifySTT requires a transcript match before a local assistant wake can act.
 	VerifySTT bool `json:"verify_stt,omitempty"`
 
+	STTWakes STTWakeCounts `json:"stt_wakes,omitzero"`
+
 	// Stream sends the microphones to Home Assistant all the time the device is idle, and its pipeline's
 	// wake word engine listens for the first wake word in place of the device's.
 	Stream bool `json:"stream,omitempty"`
@@ -305,6 +307,30 @@ func (w Wake) Slots(n int) []WakeWord {
 
 // OnHAWriter is Home Assistant's wake word engine.
 type OnHAWriter struct{ st *Store }
+
+// STTWakeCounts are lifetime verification totals for this satellite.
+type STTWakeCounts struct {
+	Sent    uint64 `json:"sent"`
+	Allowed uint64 `json:"allowed"`
+	Blocked uint64 `json:"blocked"`
+}
+
+// RecordSTTWake records a sent request and its verdict, if STT returned one.
+func (w OnHAWriter) RecordSTTWake(allowed, blocked bool) (STTWakeCounts, error) {
+	var counts STTWakeCounts
+	err := w.st.Update(func(c *Config) {
+		totals := &c.Wake.OnHA.STTWakes
+		totals.Sent++
+		if allowed {
+			totals.Allowed++
+		}
+		if blocked {
+			totals.Blocked++
+		}
+		counts = *totals
+	})
+	return counts, err
+}
 
 func (w OnHAWriter) Stream(v bool) error {
 	return w.st.Update(func(c *Config) { c.Wake.OnHA.Stream = v })
