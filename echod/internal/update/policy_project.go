@@ -1,4 +1,4 @@
-//go:build spot && wakewordverification
+//go:build wakewordverification && !panel
 
 package update
 

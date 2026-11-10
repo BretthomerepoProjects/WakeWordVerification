@@ -31,6 +31,12 @@ func (c Channel) Label() string {
 // on the network. Asset paths do not count against it.
 func (c Channel) URL() string {
 	if projectReleaseFeed != "" {
+		switch archSuffix {
+		case "":
+			return projectReleaseFeed + "/download/wakeword-show-stable/manifest.json"
+		case "-dot", "-donut":
+			return projectReleaseFeed + "/download/wakeword" + archSuffix + "-stable/manifest.json"
+		}
 		return projectReleaseFeed + "/latest/download/manifest.json"
 	}
 	if !Published() {
