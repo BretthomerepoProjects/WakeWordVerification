@@ -4,6 +4,8 @@
 
 <h3 align="center">Your Echo Show, rebuilt. Linux inside, Home Assistant in charge, no Amazon cloud.</h3>
 
+Using WakeWordVerification firmware? See the [Home Assistant wake verification setup guide](docs/wake-verification-setup.md).
+
 <p align="center">
   <a href="https://github.com/HuskerMinion/techo5/releases/latest"><img src="https://img.shields.io/github/v/release/HuskerMinion/techo5?label=release&color=e9a23b" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Linux-Alpine-0D597F?logo=alpinelinux&logoColor=white" alt="Alpine Linux">

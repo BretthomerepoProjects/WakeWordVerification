@@ -1,5 +1,7 @@
 # WakeWordVerification releases
 
+After installing the firmware, follow the [wake verification setup guide](wake-verification-setup.md) for each satellite.
+
 WakeWordVerification carries the shared TECHO5 daemon and its upstream history. See [LICENSE](../LICENSE) and [NOTICE](../NOTICE). The first project update target is the Echo Spot 1st generation (`rook`). Build it with Go 1.27.3, `GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0`, and `-tags spot,wakewordverification`. Set the daemon's `internal/layout.Version` to the manifest version and record the source revision in `internal/layout.GitCommit`.
 
 The project build checks [WakeWordVerification releases](https://github.com/BretthomerepoProjects/WakeWordVerification/releases) and verifies its manifest with the project Ed25519 public key. Use one published, versioned release tagged `wakeword-spot-<version>` as GitHub's latest release. Scheduled installs are disabled. To install a later release, use the firmware update entity on the Spot's Home Assistant page. A verified `arm-spot` rootfs is downloaded, checked against the signed size and SHA-256, then installed in the inactive slot.
