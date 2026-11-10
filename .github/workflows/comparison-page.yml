@@ -35,6 +35,7 @@ jobs:
           path: _site
 
   deploy:
+    if: github.repository == 'HuskerMinion/techo5'
     needs: build
     runs-on: ubuntu-latest
     permissions:

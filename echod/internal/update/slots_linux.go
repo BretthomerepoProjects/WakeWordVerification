@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/bootreason"
@@ -54,6 +55,9 @@ func installRootfs(ctx context.Context, m Manifest, progress func(float32), phas
 	}
 	if err := b.valid(m.Version, key); err != nil {
 		return err
+	}
+	if projectReleaseFeed != "" && !strings.HasPrefix(b.URL, projectReleaseFeed+"/download/") {
+		return fmt.Errorf("update: rootfs is outside the project release repository")
 	}
 	// A kernel on trial (athena, update/kernel) has its tries to use first: a new slot on trial with it
 	// would share its boots, and a bad kernel would take the slot down with it.

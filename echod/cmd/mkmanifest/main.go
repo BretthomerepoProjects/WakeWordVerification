@@ -56,7 +56,7 @@ func main() {
 		out         = flag.String("out", "", "where to write the manifest, or stdout")
 		// Devices believe a manifest only with the release key's signature beside it
 		// (internal/update/trust.go), so a release without one offers nothing.
-		signKey = flag.String("sign-key", "", "the release signing key file; writes <out>.sig next to the manifest")
+		signKey = flag.String("sign-key", "", "the release signing key file, or - for stdin; writes <out>.sig")
 	)
 	flag.Var(extraRootfs, "rootfs", "KEY=FILE: a rootfs tarball published under KEY, hashed and measured; repeat for each")
 	flag.Var(&assets, "asset", "another file this release publishes, hashed and measured under its own name; repeat for each")
@@ -146,7 +146,12 @@ func sign(out, keyFile string) error {
 	if err != nil {
 		return err
 	}
-	seed, err := os.ReadFile(keyFile)
+	var seed []byte
+	if keyFile == "-" {
+		seed, err = io.ReadAll(io.LimitReader(os.Stdin, 1024))
+	} else {
+		seed, err = os.ReadFile(keyFile)
+	}
 	if err != nil {
 		return err
 	}

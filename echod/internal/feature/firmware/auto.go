@@ -36,6 +36,10 @@ func (u *Firmware) buildAuto() {
 		},
 	}
 	u.auto.OnCommand = func(on bool) {
+		if update.ManualOnly {
+			u.auto.Set(false)
+			return
+		}
 		u.auto.Set(on)
 		if err := config.Set().Update().AutoInstall(on); err != nil {
 			slog.Error("saving automatic updates failed", "err", err)
@@ -45,16 +49,19 @@ func (u *Firmware) buildAuto() {
 }
 
 // Restore shows the saved setting.
-func (u *Firmware) Restore(c config.Config) { u.auto.Set(c.Update.AutoInstall) }
+func (u *Firmware) Restore(c config.Config) { u.auto.Set(!update.ManualOnly && c.Update.AutoInstall) }
 
 // SetAutoInstall is the setting, from the screen or the setup page.
 func (u *Firmware) SetAutoInstall(on bool) { u.auto.OnCommand(on) }
 
 // AutoInstall is whether updates install by themselves.
-func (u *Firmware) AutoInstall() bool { return config.Get().Update.AutoInstall }
+func (u *Firmware) AutoInstall() bool { return !update.ManualOnly && config.Get().Update.AutoInstall }
 
 // autoLoop installs overnight. One try a night: a download that fails is tried again the next.
 func (u *Firmware) autoLoop(ctx context.Context) {
+	if update.ManualOnly {
+		return
+	}
 	t := time.NewTicker(autoLook)
 	defer t.Stop()
 	var tried string // the night last tried, as a date

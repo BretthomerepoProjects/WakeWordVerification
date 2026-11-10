@@ -30,6 +30,9 @@ func (c Channel) Label() string {
 // requests an hour per address, which several devices behind one router would share with everything else
 // on the network. Asset paths do not count against it.
 func (c Channel) URL() string {
+	if projectReleaseFeed != "" {
+		return projectReleaseFeed + "/latest/download/manifest.json"
+	}
 	if !Published() {
 		return ""
 	}
@@ -45,4 +48,9 @@ func (c Channel) URL() string {
 func Published() bool { return releases != "" }
 
 // Channels is every channel, in the order Home Assistant should offer them.
-func Channels() []Channel { return []Channel{Stable, Dev} }
+func Channels() []Channel {
+	if projectReleaseFeed != "" {
+		return []Channel{Stable}
+	}
+	return []Channel{Stable, Dev}
+}
