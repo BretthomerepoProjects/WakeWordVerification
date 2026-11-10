@@ -10,7 +10,6 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
-	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/update"
 )
 
@@ -25,8 +24,6 @@ const (
 
 	// autoLook is how often it looks, inside those hours and out.
 	autoLook = 15 * time.Minute
-
-	projectAutoLook = 5 * time.Minute
 )
 
 func (u *Firmware) buildAuto() {
@@ -39,42 +36,33 @@ func (u *Firmware) buildAuto() {
 		},
 	}
 	u.auto.OnCommand = func(on bool) {
-		writer := config.Set().Update()
-		save := writer.AutoInstall
-		if update.ProjectAutoUpdates {
-			save = writer.ProjectAutoInstall
+		if update.ManualOnly {
+			u.auto.Set(false)
+			return
 		}
-		if err := save(on); err != nil {
+		u.auto.Set(on)
+		if err := config.Set().Update().AutoInstall(on); err != nil {
 			slog.Error("saving automatic updates failed", "err", err)
 		}
-		u.Restore(config.Get())
-		slog.Info("updates install automatically", "on", u.AutoInstall())
+		slog.Info("updates install automatically", "on", on)
 	}
 }
 
 // Restore shows the saved setting.
-func (u *Firmware) Restore(c config.Config) { u.auto.Set(autoInstallEnabled(c.Update)) }
+func (u *Firmware) Restore(c config.Config) { u.auto.Set(!update.ManualOnly && c.Update.AutoInstall) }
 
 // SetAutoInstall is the setting, from the screen or the setup page.
 func (u *Firmware) SetAutoInstall(on bool) { u.auto.OnCommand(on) }
 
 // AutoInstall is whether updates install by themselves.
-func (u *Firmware) AutoInstall() bool { return autoInstallEnabled(config.Get().Update) }
+func (u *Firmware) AutoInstall() bool { return !update.ManualOnly && config.Get().Update.AutoInstall }
 
-func autoInstallEnabled(c config.Update) bool {
-	if update.ProjectAutoUpdates {
-		return c.ProjectAutoInstall
-	}
-	return c.AutoInstall
-}
-
-// autoLoop checks the release feed on its schedule and backs off after a failed install.
+// autoLoop installs overnight. One try a night: a download that fails is tried again the next.
 func (u *Firmware) autoLoop(ctx context.Context) {
-	interval := autoLook
-	if update.ProjectAutoUpdates {
-		interval = projectAutoLook
+	if update.ManualOnly {
+		return
 	}
-	t := time.NewTicker(interval)
+	t := time.NewTicker(autoLook)
 	defer t.Stop()
 	var tried string // the night last tried, as a date
 	for {
@@ -84,13 +72,14 @@ func (u *Firmware) autoLoop(ctx context.Context) {
 		case <-t.C:
 		}
 		now := time.Now()
-		date := now.Format("2006-01-02")
-		if !autoDue(u.AutoInstall(), now, tried, autoBusy(), update.ProjectAutoUpdates) {
+		playing, _ := media.Get().Playing()
+		// First run still pending is somebody partway through setting the device up (feature/firstrun):
+		// it waits until they are done, so nothing restarts under them.
+		busy := playing || ring.IsSounding() || update.Installing() || config.Get().FirstRunPending()
+		if !autoDue(config.Get().Update.AutoInstall, now, tried, busy) {
 			continue
 		}
-		if !update.ProjectAutoUpdates {
-			tried = date
-		}
+		tried = now.Format("2006-01-02")
 		if !update.Published() {
 			// A panel's app looks and installs in one go (askApp), and installs nothing that is not newer.
 			slog.Info("asking the app to install an update by itself, overnight")
@@ -98,22 +87,15 @@ func (u *Firmware) autoLoop(ctx context.Context) {
 			continue
 		}
 		u.Check(ctx)
-		if v := u.Offered(); v != "" && u.AutoInstall() && !autoBusy() {
-			tried = date
-			slog.Info("installing an update automatically", "version", v)
+		if v := u.Offered(); v != "" {
+			slog.Info("installing an update by itself, overnight", "version", v)
 			u.Install(ctx)
 		}
 	}
 }
 
-func autoBusy() bool {
-	playing, _ := media.Get().Playing()
-	return playing || ring.IsSounding() || update.Installing() || config.Get().FirstRunPending() ||
-		(update.ProjectAutoUpdates && voice.Get().Busy())
-}
-
-// autoDue keeps the overnight window for upstream builds. A project opt-in can run while idle at any hour.
-func autoDue(on bool, now time.Time, tried string, busy, allowDaytime bool) bool {
-	return on && !busy && tried != now.Format("2006-01-02") &&
-		(allowDaytime || now.Hour() >= autoFrom && now.Hour() < autoTo)
+// autoDue is whether to look for an update and install it now: switched on, inside the night's hours,
+// not tried already tonight, and nothing playing or ringing.
+func autoDue(on bool, now time.Time, tried string, busy bool) bool {
+	return on && !busy && now.Hour() >= autoFrom && now.Hour() < autoTo && tried != now.Format("2006-01-02")
 }

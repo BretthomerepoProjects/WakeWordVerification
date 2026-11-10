@@ -20,9 +20,7 @@ const checkSettle = 5 * time.Minute
 
 // Run looks for a newer build on its own schedule, and keeps the one this process is running.
 func (f *Firmware) Run(ctx context.Context) error {
-	if !update.ProjectAutoUpdates {
-		go f.autoLoop(ctx)
-	}
+	go f.autoLoop(ctx)
 	first := time.NewTimer(checkSettle)
 	defer first.Stop()
 
@@ -35,9 +33,6 @@ func (f *Firmware) Run(ctx context.Context) error {
 		// a network to ask over and a binary worth keeping.
 		update.Commit()
 		f.Check(ctx)
-		if update.ProjectAutoUpdates {
-			go f.autoLoop(ctx)
-		}
 	}
 
 	t := time.NewTicker(checkEvery)
