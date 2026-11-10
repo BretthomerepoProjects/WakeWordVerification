@@ -21,6 +21,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/firmware"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
+	"github.com/HuskerMinion/techo5/echod/internal/update"
 )
 
 // The steps, in order. Hello and Done are the cards at either end; the rest are counted.
@@ -226,7 +227,7 @@ func ArriveAtUpdates(done func()) {
 	if !updatesArrived.CompareAndSwap(false, true) {
 		return
 	}
-	if !AutoInstall() {
+	if !update.ProjectAutoUpdates && !AutoInstall() {
 		SetAutoInstall(true)
 	}
 	background.Add(1)

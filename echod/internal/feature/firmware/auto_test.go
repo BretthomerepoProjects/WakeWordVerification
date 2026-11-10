@@ -3,6 +3,9 @@ package firmware
 import (
 	"testing"
 	"time"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/update"
 )
 
 // Overnight, once a night, only while quiet, only when switched on.
@@ -27,8 +30,24 @@ func TestAutoInstallIsDueOvernightOnce(t *testing.T) {
 		{false, at(3, 0), "", false, false, "switched off"},
 	}
 	for _, c := range cases {
-		if got := autoDue(c.on, c.now, c.tried, c.busy); got != c.want {
+		if got := autoDue(c.on, c.now, c.tried, c.busy, false); got != c.want {
 			t.Errorf("%s: autoDue = %v, want %v", c.why, got, c.want)
 		}
+	}
+}
+
+func TestProjectAutoInstallUsesItsOwnOptInAndCanRunDuringTheDay(t *testing.T) {
+	if !update.ProjectAutoUpdates {
+		t.Skip("requires a project firmware build")
+	}
+	afternoon := time.Date(2026, 9, 30, 14, 0, 0, 0, time.Local)
+	saved := config.Update{AutoInstall: true}
+	if autoDue(autoInstallEnabled(saved), afternoon, "", false, true) {
+		t.Fatal("an inherited upstream setting enabled project auto updates")
+	}
+	saved.ProjectAutoInstall = true
+	if !autoDue(autoInstallEnabled(saved), afternoon, "", false, true) ||
+		autoDue(autoInstallEnabled(saved), afternoon, "", true, true) {
+		t.Fatal("project auto updates should run only while idle")
 	}
 }

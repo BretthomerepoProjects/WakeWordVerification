@@ -13,6 +13,9 @@ type Update struct {
 	// AutoInstall installs an update the channel offers by itself, overnight while nothing is playing,
 	// for a device nobody is going to press Install on: one with no Home Assistant, far away.
 	AutoInstall bool `json:"auto_install,omitempty"`
+
+	// ProjectAutoInstall is a separate opt-in for WakeWordVerification.
+	ProjectAutoInstall bool `json:"project_auto_install,omitempty"`
 }
 
 const DefaultChannel = "stable"
@@ -29,6 +32,10 @@ func (w UpdateWriter) Channel(v string) error {
 
 func (w UpdateWriter) AutoInstall(v bool) error {
 	return w.st.Update(func(c *Config) { c.Update.AutoInstall = v })
+}
+
+func (w UpdateWriter) ProjectAutoInstall(v bool) error {
+	return w.st.UpdateOrUndo(func(c *Config) { c.Update.ProjectAutoInstall = v })
 }
 
 func (w UpdateWriter) LastVersion(v string) error {

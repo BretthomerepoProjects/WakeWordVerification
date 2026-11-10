@@ -11,6 +11,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/firmware"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
+	"github.com/HuskerMinion/techo5/echod/internal/update"
 )
 
 // updatesSection is the device's own software: what runs, what is offered, a button to install it, and
@@ -48,9 +49,13 @@ func updatesSection(w http.ResponseWriter, token string) {
 	if fw.AutoInstall() {
 		checked = " checked"
 	}
+	when := "overnight between 2 and 5 in the morning while nothing is playing"
+	if update.ProjectAutoUpdates {
+		when = "when the device is idle"
+	}
 	fmt.Fprintf(w, `<p><label><input type="checkbox" name="auto" value="yes"%s style="width:auto"> Install updates
-	 automatically, overnight between 2 and 5 in the morning while nothing is playing</label></p>
-	 <p><button type="submit">Save</button></p></form></fieldset>`, checked)
+	 automatically, %s</label></p>
+	 <p><button type="submit">Save</button></p></form></fieldset>`, checked, when)
 }
 
 func saveUpdates(what string, auto bool) string {
