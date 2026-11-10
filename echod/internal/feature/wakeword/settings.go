@@ -43,7 +43,7 @@ func VerifiedChime(ctx context.Context, slot int) (time.Time, bool) {
 	if !Tones(slot, false) {
 		return time.Now(), ctx.Err() == nil
 	}
-	return speaker.Sound().ChimeComplete(ctx, speaker.WakeTone(toneFor(slot, false)))
+	return speaker.Sound().ChimeAudible(ctx, speaker.WakeTone(toneFor(slot, false)), !config.Get().Microphone.Cancel)
 }
 
 // ThinkingEffect and ReplyingEffect are what those phases show, empty to leave them to Effect.

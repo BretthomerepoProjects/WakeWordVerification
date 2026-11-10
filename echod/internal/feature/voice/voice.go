@@ -265,7 +265,7 @@ func (v *Voice) CanVerifyWake(slot int) bool {
 	return !v.Busy() && haAnswers(slot) && v.HomeAssistant() && !v.turn.micBusy()
 }
 
-// VerifiedWake sounds an approved wake, then opens Assist at the end of the cue.
+// VerifiedWake sounds an approved wake and opens Assist when the audible cue ends.
 func (v *Voice) VerifiedWake(ctx context.Context, slot int) {
 	if ctx.Err() != nil || !config.Get().Wake.OnHA.VerifySTT || !v.CanVerifyWake(slot) {
 		return

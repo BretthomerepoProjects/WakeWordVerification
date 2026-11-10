@@ -179,6 +179,10 @@ func (c *conversation) watchEvent(e event) bool {
 		// Whatever comes now is this run's: a run let go of before it closed has nothing more to say.
 		c.staleRun = false
 		c.runURL = e.url
+		if c.verifiedAudioReady != nil {
+			close(c.verifiedAudioReady)
+			c.verifiedAudioReady = nil
+		}
 		return true
 
 	case evWakeStart:

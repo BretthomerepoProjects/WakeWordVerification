@@ -30,7 +30,8 @@ func (c *conversation) startVerifiedCue(cue *verifiedCue) {
 	cue.result = make(chan time.Time, 1)
 	c.cue = cue
 	// Only the display changes at cue start. The actual listening phase starts
-	// after playback so neither the cue nor the wake word reaches Assist.
+	// once the audible cue ends. The wake word and the loud part of the cue
+	// stay out of the command audio.
 	c.shown = State{Phase: phaseListening.String()}
 	Changed.Emit(c.shown)
 	safe.Go("verified wake cue", func() {

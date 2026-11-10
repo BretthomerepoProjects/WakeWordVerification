@@ -31,3 +31,24 @@ func TestVerifiedCueShowsListeningBeforeOpeningAssist(t *testing.T) {
 		t.Fatal("canceling the cue should restore the idle display")
 	}
 }
+
+func TestVerifiedTurnWaitsForAssistRunBeforeSendingAudio(t *testing.T) {
+	w := newWatcher(t, config.OnHA{VerifySTT: true})
+	ready := make(chan struct{})
+	w.verifiedAudioReady = ready
+	w.handle(event{kind: evSpeaking})
+	select {
+	case <-ready:
+		t.Fatal("audio was released before Assist opened the run")
+	default:
+	}
+	w.handle(event{kind: evRunStart})
+	select {
+	case <-ready:
+	default:
+		t.Fatal("audio was held after Assist opened the run")
+	}
+	if w.verifiedAudioReady != nil {
+		t.Fatal("the completed gate would leak into the next turn")
+	}
+}

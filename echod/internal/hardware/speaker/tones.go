@@ -215,9 +215,9 @@ func (d *Driver) Chime(notes []Note) {
 	d.Interject(func(p *Player) { p.Chime(toneLevel, notes...) })
 }
 
-// ChimeComplete plays a chime in the overlay lane and returns when its samples
-// have cleared the output device. It does not wait for background playback.
-func (d *Driver) ChimeComplete(ctx context.Context, notes []Note) (time.Time, bool) {
+// ChimeAudible plays the full chime and returns at the end of its audible part.
+// The quiet tail stays queued so the recording still plays as authored.
+func (d *Driver) ChimeAudible(ctx context.Context, notes []Note, uncanceled bool) (time.Time, bool) {
 	if d == nil || d.p == nil || ctx.Err() != nil {
 		return time.Time{}, false
 	}
@@ -227,10 +227,12 @@ func (d *Driver) ChimeComplete(ctx context.Context, notes []Note) (time.Time, bo
 	if playback, _ := d.p.device(); playback == nil {
 		return time.Time{}, false
 	}
+	tail := max(Length(notes)-Audible(notes, uncanceled), 0)
+	tailSamples := int(tail * time.Duration(Rate*Channels) / time.Second)
 	d.Chime(notes)
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()
-	for d.p.Overlaying() {
+	for d.p.overlaySamples() > tailSamples {
 		select {
 		case <-ctx.Done():
 			return time.Time{}, false

@@ -173,6 +173,10 @@ type conversation struct {
 	events chan event
 	cue    *verifiedCue // owned by the conversation loop
 
+	// verifiedAudioReady is closed by the loop when Assist has opened the
+	// command run. Until then the microphone history keeps the first words.
+	verifiedAudioReady chan struct{}
+
 	// out is everything bound for Home Assistant, so nothing local waits on the socket.
 	out chan func() error
 
@@ -1095,6 +1099,7 @@ func (c *conversation) start(n nextTurn) (started bool) {
 	var cueEnd time.Time
 	if n.verified {
 		cueEnd = n.at
+		c.verifiedAudioReady = make(chan struct{})
 	}
 	c.startAudio(slot, n.followUp, hadAudio(n), historyFor(slot, n.followUp, n.confirmed, n.waited, heard), cueEnd)
 	// The phrase is logged for a follow-up too, because it is what chose the pipeline — not because
@@ -1543,6 +1548,7 @@ func (c *conversation) startAudio(slot int, followUp, continued bool, history ti
 	// be kept out of the microphone.
 	id := c.turn.ID()
 	be := c.be
+	ready := c.verifiedAudioReady
 	// A call up meanwhile holds the far end back from the room for as long as this listens (phone's
 	// playFarEnd), so the caller does not speak into the turn.
 	listened := phone.Get().TurnListening()
@@ -1550,6 +1556,13 @@ func (c *conversation) startAudio(slot int, followUp, continued bool, history ti
 	safe.Go("turn audio", func() {
 		defer streams.Done()
 		defer listened()
+		if ready != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ready:
+			}
+		}
 		c.stream(ctx, be, slot, followUp, continued, id, history, cueEnd)
 	})
 }
@@ -1564,6 +1577,7 @@ func (c *conversation) stopStreaming() {
 	}
 	c.stopAudio()
 	c.stopAudio = nil
+	c.verifiedAudioReady = nil
 
 	c.send("end of audio", c.be.End)
 }
