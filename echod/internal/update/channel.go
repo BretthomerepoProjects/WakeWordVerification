@@ -1,5 +1,7 @@
 package update
 
+import "github.com/HuskerMinion/techo5/echod/internal/layout"
+
 // Channel is which stream of releases a device follows. The URLs are compiled in rather than
 // configured, so Home Assistant can move a device between our own streams but cannot aim it at
 // somebody else's binary — the device runs this as root, and a text field would be a way to replace it.
@@ -33,7 +35,10 @@ func (c Channel) URL() string {
 	if projectReleaseFeed != "" {
 		switch archSuffix {
 		case "":
-			return projectReleaseFeed + "/download/wakeword-show-stable/manifest.json"
+			if layout.Board == "crown" || layout.Board == "athena" {
+				return projectReleaseFeed + "/download/wakeword-show8-stable/manifest.json"
+			}
+			return projectReleaseFeed + "/download/wakeword-show5-stable/manifest.json"
 		case "-dot", "-donut":
 			return projectReleaseFeed + "/download/wakeword" + archSuffix + "-stable/manifest.json"
 		}
