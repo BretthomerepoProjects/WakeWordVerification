@@ -105,6 +105,7 @@ const (
 	evAnnouncing                   // an announcement that asks for an answer is being said (event.text)
 	evAnnounced                    // and was cut off, so no answer follows
 	evScored                       // the peak a wake word reached (event.slot, event.peak)
+	evVerifiedCue                  // STT approved a wake, so show listening as the cue starts
 )
 
 type event struct {
@@ -124,6 +125,7 @@ type event struct {
 
 	// woke is an evStart from the wake word (Woke), not a button or Home Assistant (Start).
 	woke bool
+	cue  *verifiedCue
 
 	// asked is an evStart Home Assistant asked for, by an announcement that wants an answer.
 	asked bool
@@ -169,6 +171,7 @@ type conversation struct {
 	log    *activity.Log
 
 	events chan event
+	cue    *verifiedCue // owned by the conversation loop
 
 	// out is everything bound for Home Assistant, so nothing local waits on the socket.
 	out chan func() error
@@ -317,6 +320,7 @@ const drainFor = 3 * time.Second
 type nextTurn struct {
 	slot     int
 	followUp bool
+	verified bool
 
 	// woke is a turn the wake word opened, rather than a button, Home Assistant or a follow-up: the
 	// only kind that can have been opened by mistake.
@@ -481,12 +485,15 @@ func (c *conversation) Run(ctx context.Context) {
 	defer tick.Stop()
 
 	for {
-		var expired, waited <-chan time.Time
+		var expired, waited, cueDone <-chan time.Time
 		if c.deadline != nil {
 			expired = c.deadline.C
 		}
 		if c.grace != nil {
 			waited = c.grace.C
+		}
+		if c.cue != nil {
+			cueDone = c.cue.result
 		}
 
 		select {
@@ -497,6 +504,8 @@ func (c *conversation) Run(ctx context.Context) {
 			c.handle(event{kind: evTimeout})
 		case <-waited:
 			c.handle(event{kind: evPending})
+		case at := <-cueDone:
+			c.finishVerifiedCue(at)
 		case <-c.watchTimeout():
 			c.handle(event{kind: evUnconfirmed})
 		case <-tick.C:
@@ -527,6 +536,8 @@ func (c *conversation) dropQuestion() {
 
 func (c *conversation) turnEvent(e event) {
 	switch e.kind {
+	case evVerifiedCue:
+		c.startVerifiedCue(e.cue)
 	case evScored:
 		c.scored(e.slot, e.peak, e.at)
 
@@ -823,6 +834,7 @@ func (c *conversation) turnEvent(e event) {
 		c.trouble()
 
 	case evCancel:
+		c.finishVerifiedCue(time.Time{})
 		c.clearPending()
 
 		// Stopping the sound comes first and does not care whether a turn is open: an announcement
@@ -877,7 +889,12 @@ func (c *conversation) muted() (bool, error) { return mute.Get().Muted() }
 
 // start opens a turn on the pipeline paired with a slot, and reports whether it did.
 func (c *conversation) start(n nextTurn) (started bool) {
+	c.finishVerifiedCue(time.Time{})
 	slot := n.slot
+	if n.verified && (!config.Get().Wake.OnHA.VerifySTT || !haAnswers(slot) ||
+		c.phase != phaseIdle || c.micBusy() || time.Since(n.at) >= mic.Confirming) {
+		return false
+	}
 
 	// A realtime follow-up keeps the last turn's session open (#487). If the turn cannot open after all -
 	// the microphones muted or taken, the day's minutes gone - that session must not be left open and
@@ -976,8 +993,10 @@ func (c *conversation) start(n nextTurn) (started bool) {
 	}
 	if !c.be.Ready() {
 		slog.Warn("no voice pipeline ready, ignoring wake", "slot", slot+1, "backend", c.be.Name())
-		wakeword.Chime(slot, n.followUp)
-		c.trouble()
+		if !n.verified {
+			wakeword.Chime(slot, n.followUp)
+			c.trouble()
+		}
 		return false
 	}
 
@@ -1019,7 +1038,9 @@ func (c *conversation) start(n nextTurn) (started bool) {
 	// A follow-up chimes like the wake word that started the conversation, unless the slot has been
 	// told a follow-up should be silent: the microphone is open again with nothing said to say so. It
 	// is not a wake, though, so it does not report a phrase nobody spoke.
-	wakeword.Chime(slot, n.followUp)
+	if !n.verified {
+		wakeword.Chime(slot, n.followUp)
+	}
 	if !n.followUp {
 		c.log.Woke(phrase)
 	}
@@ -1071,7 +1092,11 @@ func (c *conversation) start(n nextTurn) (started bool) {
 	if n.woke && !n.at.IsZero() {
 		heard = time.Since(n.at)
 	}
-	c.startAudio(slot, n.followUp, hadAudio(n), historyFor(slot, n.followUp, n.confirmed, n.waited, heard))
+	var cueEnd time.Time
+	if n.verified {
+		cueEnd = n.at
+	}
+	c.startAudio(slot, n.followUp, hadAudio(n), historyFor(slot, n.followUp, n.confirmed, n.waited, heard), cueEnd)
 	// The phrase is logged for a follow-up too, because it is what chose the pipeline — not because
 	// anyone said it.
 	slog.Info("turn started", "slot", slot+1, "phrase", phrase, "follow_up", n.followUp, "on_ha", n.continued)
@@ -1509,7 +1534,7 @@ func audioSettings() *api.VoiceAssistantAudioSettings {
 
 // startAudio begins sending microphone frames. The streamer only reads, so it needs no coordination
 // beyond being told to stop. continued is a run that has had the audio up to now already.
-func (c *conversation) startAudio(slot int, followUp, continued bool, history time.Duration) {
+func (c *conversation) startAudio(slot int, followUp, continued bool, history time.Duration, cueEnd time.Time) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.stopAudio = cancel
 
@@ -1525,7 +1550,7 @@ func (c *conversation) startAudio(slot int, followUp, continued bool, history ti
 	safe.Go("turn audio", func() {
 		defer streams.Done()
 		defer listened()
-		c.stream(ctx, be, slot, followUp, continued, id, history)
+		c.stream(ctx, be, slot, followUp, continued, id, history, cueEnd)
 	})
 }
 
@@ -1549,12 +1574,16 @@ func (c *conversation) stopStreaming() {
 func hadAudio(n nextTurn) bool { return n.continued && !n.confirmed }
 
 // stream sends microphone frames until it is told to stop.
-func (c *conversation) stream(ctx context.Context, be backend, slot int, followUp, continued bool, id string, history time.Duration) {
+func (c *conversation) stream(ctx context.Context, be backend, slot int, followUp, continued bool, id string, history time.Duration, cueEnd time.Time) {
+	if !cueEnd.IsZero() {
+		history = time.Since(cueEnd)
+	}
 	frames, pre, unlisten := c.source.ListenHistory("turn", history)
 	defer unlisten()
-	hold := holdsForTone(slot, followUp)
-	slog.Info("turn: wake sound", "tone", wakeword.Tones(slot, followUp), "held", hold, "history_ms", len(pre)*1000/mic.Rate)
-	c.pump(ctx, be, slot, followUp, continued, hold, id, pre, frames)
+	tone := cueEnd.IsZero() && wakeword.Tones(slot, followUp)
+	hold := tone && holdsForTone(slot, followUp)
+	slog.Info("turn: wake sound", "tone", tone, "held", hold, "history_ms", len(pre)*1000/mic.Rate)
+	c.pump(ctx, be, slot, followUp, continued, hold, id, pre, frames, tone)
 }
 
 // historyFor is how far back a turn's history reaches. Without a wake sound people run straight on
@@ -1645,7 +1674,7 @@ func toneEnds(slot int, followUp bool) time.Duration {
 
 // pump sends the history and then the frames to the backend until it is told to stop. hold is
 // holdsForTone.
-func (c *conversation) pump(ctx context.Context, be backend, slot int, followUp, continued, hold bool, id string, pre []int16, frames <-chan []int16) {
+func (c *conversation) pump(ctx context.Context, be backend, slot int, followUp, continued, hold bool, id string, pre []int16, frames <-chan []int16, tone bool) {
 	buf := make([]byte, 0, mic.FrameSamples*2)
 
 	// Send what was already said before this turn began. The wake word can only be recognized after
@@ -1688,7 +1717,7 @@ func (c *conversation) pump(ctx context.Context, be backend, slot int, followUp,
 	// turn also ends once nothing near it has been heard for saidQuiet: a request said inside the
 	// sound, or running just past it, that the fresh detector heard too little of to decide on.
 	var deafUntil time.Time
-	if tone := wakeword.Tones(slot, followUp); tone && !hold {
+	if tone && !hold {
 		deafUntil = clock().Add(toneEnds(slot, followUp))
 		ep.Hold(true)
 	}

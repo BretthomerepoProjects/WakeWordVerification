@@ -1,6 +1,7 @@
 package speaker
 
 import (
+	"context"
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
@@ -212,4 +213,37 @@ func (d *Driver) Chime(notes []Note) {
 		return
 	}
 	d.Interject(func(p *Player) { p.Chime(toneLevel, notes...) })
+}
+
+// ChimeComplete plays a chime in the overlay lane and returns when its samples
+// have cleared the output device. It does not wait for background playback.
+func (d *Driver) ChimeComplete(ctx context.Context, notes []Note) (time.Time, bool) {
+	if d == nil || d.p == nil || ctx.Err() != nil {
+		return time.Time{}, false
+	}
+	if len(notes) == 0 {
+		return time.Now(), true
+	}
+	if playback, _ := d.p.device(); playback == nil {
+		return time.Time{}, false
+	}
+	d.Chime(notes)
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for d.p.Overlaying() {
+		select {
+		case <-ctx.Done():
+			return time.Time{}, false
+		case <-tick.C:
+		}
+	}
+	completed := time.Now().Add(OutputLatency)
+	timer := time.NewTimer(time.Until(completed))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return time.Time{}, false
+	case <-timer.C:
+		return completed, ctx.Err() == nil
+	}
 }

@@ -322,6 +322,10 @@ func (c *conversation) heardOnHA() {
 		return
 	}
 	c.dropWatch()
+	if config.Get().Wake.OnHA.VerifySTT {
+		c.closeRun()
+		return
+	}
 
 	// A call or a talk through a camera began after the run did: whatever was heard was not somebody
 	// in the room asking.
@@ -370,7 +374,7 @@ func (c *conversation) closeRun() {
 func (c *conversation) confirm(slot int, peak float64) {
 	on := config.Get().Wake.OnHA
 	switch {
-	case !on.Confirm || slot != 0:
+	case !on.Confirm || on.VerifySTT || slot != 0:
 		return
 	case c.phase != phaseIdle || c.watch != nil || c.pending != nil || c.draining || c.grace != nil:
 		slog.Debug("wake candidate not asked about, busy", "slot", slot+1, "phase", c.phase)
@@ -441,14 +445,15 @@ func (c *conversation) consider() {
 	case w.mode == watchStream && !w.closing && !w.started && c.now().Sub(w.at) > startFor:
 		c.failed("home assistant never said it was listening", false)
 		c.closeWatch()
-	case !w.closing && (c.micBusy() || w.mode == watchStream && !c.mayStream()):
+	case !w.closing && (config.Get().Wake.OnHA.VerifySTT || c.micBusy() || w.mode == watchStream && !c.mayStream()):
 		c.closeWatch()
 	}
 }
 
 // mayStream is whether the microphones may go to Home Assistant now, all the time the device is idle.
 func (c *conversation) mayStream() bool {
-	return config.Get().Wake.OnHA.Stream && haAnswers(0) && !c.micBusy()
+	on := config.Get().Wake.OnHA
+	return on.Stream && !on.VerifySTT && haAnswers(0) && !c.micBusy()
 }
 
 // haAnswers is whether a slot's wake word is answered by Home Assistant's pipeline: not when the direct
