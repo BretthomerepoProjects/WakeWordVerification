@@ -166,6 +166,10 @@ func runExporter(ctx context.Context, cfg config.ExporterSettings, state func(st
 		return err
 	}
 	defer public.Close()
+	if err := openExporterPort(ctx, cfg); err != nil {
+		return err
+	}
+	defer closeExporterPort()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := child(ctx, "/usr/local/bin/node_exporter", "--web.listen-address="+address,
@@ -215,6 +219,38 @@ func runExporter(ctx context.Context, cfg config.ExporterSettings, state func(st
 		}
 		return "Running"
 	}, state)
+}
+
+const exporterChain = "TECHO5_METRICS"
+
+func exporterFirewall(ctx context.Context, args ...string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "iptables-legacy", append([]string{"-w", "2"}, args...)...).CombinedOutput(); err != nil {
+		return fmt.Errorf("metrics firewall: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func openExporterPort(ctx context.Context, cfg config.ExporterSettings) error {
+	_ = exporterFirewall(ctx, "-N", exporterChain)
+	if err := exporterFirewall(ctx, "-F", exporterChain); err != nil {
+		return err
+	}
+	jump := []string{"INPUT", "-i", "wlan0", "-j", exporterChain}
+	if err := exporterFirewall(ctx, append([]string{"-C"}, jump...)...); err != nil {
+		if err := exporterFirewall(ctx, append([]string{"-I"}, jump...)...); err != nil {
+			return err
+		}
+	}
+	return exporterFirewall(ctx, "-A", exporterChain, "-s", cfg.Source+"/32",
+		"-p", "tcp", "--dport", strconv.Itoa(int(cfg.Port)), "-j", "ACCEPT")
+}
+
+func closeExporterPort() {
+	if err := exporterFirewall(context.Background(), "-F", exporterChain); err != nil {
+		slog.Warn("could not close the metrics firewall rule", "error", err)
+	}
 }
 
 func runLogs(ctx context.Context, cfg config.LogSettings, state func(string)) error {
