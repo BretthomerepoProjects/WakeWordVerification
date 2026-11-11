@@ -530,6 +530,8 @@ func (f *Feature) settingsPage(ctx context.Context, w http.ResponseWriter, token
 		babySection(w, token)
 		privacySection(w)
 		remoteSection(w, token)
+		sshSection(w, token)
+		monitoringSection(w, token)
 	case "general":
 		nameSection(w, token)
 		updatesSection(w, token)

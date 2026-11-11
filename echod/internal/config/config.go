@@ -43,6 +43,7 @@ type Config struct {
 	Screen         Screen         `json:"screen"`
 	Home           Home           `json:"home"`
 	Security       Security       `json:"security"`
+	Monitoring     Monitoring     `json:"monitoring"`
 	Alarms         Alarms         `json:"alarms"`
 	Timers         Timers         `json:"timers"`
 	Dashboard      Dashboard      `json:"dashboard"`

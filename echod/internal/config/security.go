@@ -4,9 +4,10 @@ package config
 // server, and the camera and screen pages on the web port. Home Assistant's own link is encrypted
 // with the device key and is not a setting.
 type Security struct {
-	SSH    bool `json:"ssh"`
-	Camera bool `json:"camera_web"`
-	Screen bool `json:"screen_web"`
+	SSH      bool `json:"ssh"`
+	SSHLocal bool `json:"ssh_local,omitempty"`
+	Camera   bool `json:"camera_web"`
+	Screen   bool `json:"screen_web"`
 
 	// TalkBack lets the camera page send the microphones to a camera's speaker (config.TalkBack).
 	TalkBack bool `json:"talk_back,omitempty"`
@@ -49,7 +50,19 @@ func defaultSecurity() Security { return Security{} }
 type SecurityWriter struct{ st *Store }
 
 func (w SecurityWriter) SSH(v bool) error {
-	return w.st.Update(func(c *Config) { c.Security.SSH = v })
+	return w.st.Update(func(c *Config) {
+		c.Security.SSH = v
+		if !v {
+			c.Security.SSHLocal = false
+		}
+	})
+}
+
+func (w SecurityWriter) EnableLocalSSH() error {
+	return w.st.Update(func(c *Config) {
+		c.Security.SSH = true
+		c.Security.SSHLocal = true
+	})
 }
 
 func (w SecurityWriter) Camera(v bool) error {

@@ -155,7 +155,7 @@ fi
 
 # Our binaries and scripts.
 install -d "$R/usr/local/bin" "$R/usr/local/sbin" "$R/lib" "$R/var/lib/bluetooth" "$R/var/lib/bluealsa" "$R/usr/var/lib/bluealsa"
-for b in techo5 fbprobe audioprobe rebootto btbridge techo5-aec techo5-librespot techo5-ffmpeg techo5-ffmpeg64 techo5-gpu techo5-jpeg tailscaled techo5-shairport-sync techo5-nqptp; do
+for b in techo5 fbprobe audioprobe rebootto btbridge techo5-aec techo5-librespot techo5-ffmpeg techo5-ffmpeg64 techo5-gpu techo5-jpeg tailscaled techo5-shairport-sync techo5-nqptp node_exporter techo5-log-streamer; do
 	[ -e "$IN/bin/$b" ] && install -m 755 "$IN/bin/$b" "$R/usr/local/bin/$b"
 done
 

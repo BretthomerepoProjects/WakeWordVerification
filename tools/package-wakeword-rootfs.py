@@ -22,10 +22,15 @@ def main():
     parser.add_argument("--board", choices=("spot", "show", "dot"), default="spot")
     parser.add_argument("--base-sha256", required=True, help="digest from the verified official manifest")
     parser.add_argument("--daemon", type=pathlib.Path, required=True)
+    parser.add_argument("--node-exporter", type=pathlib.Path)
+    parser.add_argument("--log-streamer", type=pathlib.Path)
     parser.add_argument("--version", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--out", type=pathlib.Path, required=True)
     args = parser.parse_args()
+    if args.node_exporter or args.log_streamer:
+        if args.board != "spot" or not (args.node_exporter and args.log_streamer):
+            parser.error("Spot monitoring requires both ARMv7 payloads")
 
     if sha256(args.base) != args.base_sha256.lower():
         parser.error("the base does not match the authenticated official rootfs")
@@ -35,11 +40,19 @@ def main():
     else:
         daemon_path, release_path, marker = "./usr/local/bin/techo5", "./etc/techo5-release", "techo5 rootfs"
     members = {daemon_path: "0755", release_path: "0644"}
+    payloads = {daemon_path: args.daemon}
+    if args.node_exporter:
+        payloads.update({
+            "./usr/local/bin/node_exporter": args.node_exporter,
+            "./usr/local/bin/techo5-log-streamer": args.log_streamer,
+        })
+        members.update({name: "0755" for name in payloads})
     with tarfile.open(args.base) as base:
         with base.extractfile(release_path) as release:
             if not release.read().startswith(f"{marker} ".encode()):
                 raise ValueError("the base release marker does not match the requested target")
         has_spot_marker = "./etc/techo5/device.conf" in base.getnames()
+        old_members = [name for name in members if name in base.getnames()]
         if args.board == "spot":
             with base.extractfile("./etc/techo5/device.conf") as board:
                 if b'T5_PRODUCT="Echo Spot Linux"' not in board.read().splitlines():
@@ -53,11 +66,12 @@ def main():
         packed = work / "rootfs.tar.gz"
         with gzip.open(args.base, "rb") as source, raw.open("wb") as output:
             shutil.copyfileobj(source, output)
-        subprocess.run(["tar", "--delete", "-f", raw, *members], check=True)
+        subprocess.run(["tar", "--delete", "-f", raw, *old_members], check=True)
 
         (work / "usr/local/bin").mkdir(parents=True)
         (work / "etc").mkdir()
-        shutil.copyfile(args.daemon, work / daemon_path)
+        for name, payload in payloads.items():
+            shutil.copyfile(payload, work / name)
         (work / release_path).write_text(
             f"{marker} {args.version} (WakeWordVerification; source {args.revision})\n"
         )
@@ -75,9 +89,10 @@ def main():
             names = rootfs.getnames()
             if any(names.count(name) != 1 for name in members):
                 raise ValueError("each replacement must appear exactly once in the rootfs")
-            with rootfs.extractfile(daemon_path) as daemon:
-                if hashlib.file_digest(daemon, "sha256").hexdigest() != sha256(args.daemon):
-                    raise ValueError("the packaged daemon does not match the build")
+            for name, payload in payloads.items():
+                with rootfs.extractfile(name) as archived:
+                    if hashlib.file_digest(archived, "sha256").hexdigest() != sha256(payload):
+                        raise ValueError(f"the packaged {name} does not match its input")
         packed.replace(args.out)
     print(f"{sha256(args.out)}  {args.out.name}")
 

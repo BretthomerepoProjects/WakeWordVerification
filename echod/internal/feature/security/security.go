@@ -3,9 +3,7 @@
 // recording takes of a word from the setup page (feature/takes). Each is a switch in Home Assistant and
 // a row on the settings sheet's Security tab, and each starts off.
 //
-// SSH keys only ever come from Home Assistant (the ssh_keys action), whose link is encrypted with
-// the device key: the screen can open or close the server but cannot let anyone new in, and the
-// image carries no key at all.
+// SSH keys can be enrolled through the device's setup session or the encrypted Home Assistant link.
 package security
 
 import (
@@ -18,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
@@ -42,6 +41,7 @@ type Feature struct {
 	baby                      *esphome.Switch // the baby monitor page (feature/babymon)
 	lockSw                    *esphome.Switch // the settings lock (lock.go)
 	wake                      chan struct{}
+	sshKeysMu                 sync.Mutex
 
 	// Changed fires when a setting changes or the keys do; listeners must not block.
 	Changed hook.Hook[struct{}]
@@ -131,14 +131,15 @@ func (f *Feature) settleSSH() {
 	if !sshAvailable() {
 		return
 	}
-	want := config.Get().Security.SSH
+	cfg := config.Get().Security
+	want := cfg.SSH
 	running := sshRunning()
 	switch {
 	case want && !running:
 		if len(readKeys()) == 0 {
 			return // nobody could log in; opening the port would only be a port
 		}
-		if !encrypted() {
+		if !cfg.SSHLocal && !encrypted() {
 			slog.Warn("ssh: not starting while Home Assistant's link has no device key")
 			return
 		}
@@ -250,10 +251,12 @@ func (f *Feature) Actions() []*esphome.Action {
 	if !sshAvailable() {
 		return out
 	}
-	return append(out, &esphome.Action{
+	return append(out, f.enableSSHWithKeyAction(), &esphome.Action{
 		Name: "ssh_keys",
 		Args: []esphome.Arg{{Name: "keys", Type: esphome.ArgString}},
 		Run: func(c esphome.Call) (any, error) {
+			f.sshKeysMu.Lock()
+			defer f.sshKeysMu.Unlock()
 			if !encrypted() {
 				slog.Warn("ssh: keys refused while Home Assistant's link has no device key")
 				return nil, errors.New("ssh_keys: the device has no API encryption key; set one first")
