@@ -94,6 +94,7 @@ type Diag struct {
 
 	interval *esphome.Number
 	minCores *esphome.Number
+	allCores *esphome.Button
 
 	// touchBoost is the Touch boost switch (hardware/cpuboost), where this device has one.
 	touchBoost *esphome.Switch
@@ -161,6 +162,9 @@ func (d *Diag) Entities() []esphome.Entity {
 	// Holding cores online is the hotplug governor's, which an app on a tablet may not touch (coresHere).
 	if coresHere {
 		out = append(out, d.minCores)
+		if d.allCores != nil {
+			out = append(out, d.allCores)
+		}
 	}
 	// What the BLE radio hears, where the daemon has the radio (bluetooth.Here).
 	if bluetooth.Here {
@@ -210,6 +214,7 @@ func (d *Diag) collector() {
 			Name:     "Minimum CPU cores",
 			Icon:     "mdi:cpu-64-bit",
 			Category: esphome.CategoryConfig,
+			DeviceID: cpuConfigDevice,
 		},
 		Min: 1, Max: float64(setup.Present()), Step: 1,
 		Mode: esphome.NumberBox,
@@ -259,6 +264,13 @@ func (d *Diag) collector() {
 			slog.Error("saving a setting failed", "setting", d.minCores.ObjectID, "err", err)
 		}
 		d.soon()
+	}
+	if cpuConfigDevice != 0 {
+		d.allCores = &esphome.Button{
+			Base: esphome.Base{ObjectID: "use_all_cpu_cores", Name: "Use all CPU cores",
+				Icon: "mdi:cpu-64-bit", Category: esphome.CategoryConfig, DeviceID: cpuConfigDevice},
+			OnPress: func() { d.minCores.OnCommand(float32(setup.Present())) },
+		}
 	}
 }
 
@@ -595,6 +607,8 @@ func (d *Diag) hardware() {
 	}
 	d.cores = count("cpu_cores", "CPU cores")
 	d.coresOnline = count("cpu_cores_online", "CPU cores online")
+	d.cores.DeviceID = cpuConfigDevice
+	d.coresOnline.DeviceID = cpuConfigDevice
 
 	// Sampled with everything else, so at the default interval this shows the room's resting level rather
 	// than tracking speech. That is the number worth having: the sensitivity is set as a distance above

@@ -100,9 +100,10 @@ echo "== staging"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/bin" "$STAGE/tools" "$STAGE/overlay" "$STAGE/inputs/apks312"
 cp "$ROOT/bin/echod-arm" "$STAGE/bin/techo5"
-if [ "$BUILD_TAGS" = spot ]; then
+case ",$BUILD_TAGS," in
+*,spot,*|*,firmwaremonitoring,*)
 	for payload in node_exporter techo5-log-streamer; do
-		[ -f "$ROOT/bin/$payload-arm" ] || { echo "Spot monitoring payload missing: bin/$payload-arm" >&2; exit 1; }
+		[ -f "$ROOT/bin/$payload-arm" ] || { echo "Firmware monitoring payload missing: bin/$payload-arm" >&2; exit 1; }
 		cp "$ROOT/bin/$payload-arm" "$STAGE/bin/$payload"
 	done
 	(cd "$STAGE/bin" && sha256sum -c <<'EOF'
@@ -110,7 +111,8 @@ if [ "$BUILD_TAGS" = spot ]; then
 debe4964e74a811381f3ae4962a506a2ea2661a91e22998dd31eae7f42dbb42c  techo5-log-streamer
 EOF
 	)
-fi
+	;;
+esac
 for c in fbprobe audioprobe rebootto btbridge; do cp "$ROOT/bin/$c-arm" "$STAGE/bin/$c"; done
 # The WebRTC echo canceller helper is C++ built separately (tools/linux/build-aec.sh in WSL); ship it when it is there.
 [ -e "$ROOT/bin/techo5-aec-arm" ] && cp "$ROOT/bin/techo5-aec-arm" "$STAGE/bin/techo5-aec"

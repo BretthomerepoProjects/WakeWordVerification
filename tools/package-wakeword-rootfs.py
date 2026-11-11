@@ -29,8 +29,8 @@ def main():
     parser.add_argument("--out", type=pathlib.Path, required=True)
     args = parser.parse_args()
     if args.node_exporter or args.log_streamer:
-        if args.board != "spot" or not (args.node_exporter and args.log_streamer):
-            parser.error("Spot monitoring requires both ARMv7 payloads")
+        if not (args.node_exporter and args.log_streamer):
+            parser.error("firmware monitoring requires both payloads")
 
     if sha256(args.base) != args.base_sha256.lower():
         parser.error("the base does not match the authenticated official rootfs")
@@ -42,9 +42,10 @@ def main():
     members = {daemon_path: "0755", release_path: "0644"}
     payloads = {daemon_path: args.daemon}
     if args.node_exporter:
+        bin_dir = daemon_path.rsplit("/", 1)[0]
         payloads.update({
-            "./usr/local/bin/node_exporter": args.node_exporter,
-            "./usr/local/bin/techo5-log-streamer": args.log_streamer,
+            f"{bin_dir}/node_exporter": args.node_exporter,
+            f"{bin_dir}/techo5-log-streamer": args.log_streamer,
         })
         members.update({name: "0755" for name in payloads})
     with tarfile.open(args.base) as base:

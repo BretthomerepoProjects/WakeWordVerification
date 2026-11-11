@@ -1,4 +1,4 @@
-//go:build spot && linux
+//go:build linux && (spot || firmwaremonitoring)
 
 package monitoring
 
@@ -22,6 +22,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
 const streamerStatus = "/run/techo5-log-streamer/status"
@@ -226,7 +227,18 @@ const exporterChain = "TECHO5_METRICS"
 func exporterFirewall(ctx context.Context, args ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, "iptables-legacy", append([]string{"-w", "2"}, args...)...).CombinedOutput(); err != nil {
+	binary, err := exec.LookPath("iptables-legacy")
+	if err != nil {
+		binary, err = exec.LookPath("iptables")
+		if err != nil {
+			return err
+		}
+		version, err := exec.CommandContext(ctx, binary, "--version").Output()
+		if err != nil || strings.Contains(string(version), "nf_tables") {
+			return errors.New("metrics firewall requires legacy iptables")
+		}
+	}
+	if out, err := exec.CommandContext(ctx, binary, append([]string{"-w", "2"}, args...)...).CombinedOutput(); err != nil {
 		return fmt.Errorf("metrics firewall: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -263,8 +275,12 @@ func runLogs(ctx context.Context, cfg config.LogSettings, state func(string)) er
 	_ = os.Remove(streamerStatus)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	profile := "screen"
+	if strings.HasSuffix(layout.LogPath, "/echod.log") {
+		profile = "dot"
+	}
 	cmd := child(ctx, "/usr/local/bin/techo5-log-streamer", cfg.Collector,
-		strconv.Itoa(int(cfg.Port)), cfg.Hostname, "screen", streamerStatus)
+		strconv.Itoa(int(cfg.Port)), cfg.Hostname, profile, streamerStatus)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-//go:build spot && linux
+//go:build linux && (spot || firmwaremonitoring)
 
 package setup
 
