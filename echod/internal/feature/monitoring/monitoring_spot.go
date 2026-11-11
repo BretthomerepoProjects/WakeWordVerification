@@ -26,16 +26,17 @@ import (
 
 const streamerStatus = "/run/techo5-log-streamer/status"
 
-var shared = &Feature{
-	exporter: service{state: "Disabled"},
-	logs:     service{state: "Disabled"},
-}
+var shared = newFeature()
 
-func init() { component.Register(component.Network, shared, component.Order(69)) }
+func init() {
+	component.Offer(component.Offered{ID: component.DeviceMonitoring, Suffix: " monitoring"})
+	component.Register(component.Network, shared, component.Order(69))
+}
 
 type Feature struct {
 	exporter service
 	logs     service
+	entities controls
 }
 
 func (f *Feature) Name() string { return "monitoring" }
@@ -51,6 +52,26 @@ func (f *Feature) Run(ctx context.Context) error {
 		supervise(ctx, &f.logs, func() config.LogSettings {
 			return config.Get().Monitoring.Logs
 		}, func(v config.LogSettings) bool { return v.Enabled }, runLogs)
+	})
+	workers.Go(func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		var previous config.Monitoring
+		first := true
+		for {
+			cfg := config.Get()
+			if first || cfg.Monitoring != previous {
+				f.Restore(cfg)
+				first, previous = false, cfg.Monitoring
+			}
+			f.entities.exporterStatus.Set(f.exporter.get())
+			f.entities.logForwardingStatus.Set(f.logs.get())
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
 	})
 	workers.Wait()
 	return nil

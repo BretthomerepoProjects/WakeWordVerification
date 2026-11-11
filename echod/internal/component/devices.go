@@ -43,6 +43,9 @@ func AssistantDevice(slot int) uint32 { return DeviceAssistant + uint32(slot) }
 // theirs, and a slot added later does not move it.
 const DeviceTessera uint32 = 64
 
+// DeviceMonitoring groups the Spot's monitoring controls and diagnostics.
+const DeviceMonitoring uint32 = 65
+
 // Offered is a sub-device a component asks for, there only while Wanted says so. Suffix goes after the
 // device's own name, as the others' do. Wanted is asked when the server starts, which is the only time
 // Home Assistant reads the list.
