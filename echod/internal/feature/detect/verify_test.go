@@ -10,7 +10,11 @@ func TestMatchesWakePhrase(t *testing.T) {
 	}{
 		{"Alexa.", "alexa", true},
 		{"HEY, Jarvis!", "Hey Jarvis", true},
-		{"Alexa turn on the lights", "Alexa", false},
+		{"Alexa turn on the lights", "Alexa", true},
+		{"background speech, Alexa, more speech", "Alexa", true},
+		{"background speech: hey Jarvis", "Hey Jarvis", true},
+		{"hey there Jarvis", "Hey Jarvis", false},
+		{"Alexandra", "Alexa", false},
 		{"Alex", "Alexa", false},
 		{"Alexa", "", false},
 		{"", "Alexa", false},

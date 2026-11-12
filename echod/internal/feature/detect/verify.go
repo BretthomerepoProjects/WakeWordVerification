@@ -93,8 +93,8 @@ func (d *Detect) verifyWake(slot int) {
 	voice.Get().VerifiedWake(chime, slot)
 }
 
-// A wake clip should contain only the wake phrase. Whole-token matching avoids
-// accepting similar words or an unrelated sentence containing the phrase.
+// Background speech can add words to the transcript. Match the configured
+// phrase as consecutive whole tokens anywhere in the wake clip.
 func matchesWakePhrase(transcript, phrase string) bool {
 	normalize := func(value string) string {
 		words := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
@@ -103,5 +103,5 @@ func matchesWakePhrase(transcript, phrase string) bool {
 		return strings.Join(words, " ")
 	}
 	want := normalize(phrase)
-	return want != "" && normalize(transcript) == want
+	return want != "" && strings.Contains(" "+normalize(transcript)+" ", " "+want+" ")
 }
