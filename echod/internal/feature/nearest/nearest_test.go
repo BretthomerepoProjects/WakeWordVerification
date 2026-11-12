@@ -26,6 +26,7 @@ type house struct {
 	now    time.Time
 	later  []func()
 	opened []time.Time
+	faint  []time.Time
 	at0    int
 	sent   []claim
 	mine   *pending
@@ -58,6 +59,7 @@ func newHouse(t *testing.T) *house {
 	n.after = func(_ time.Duration, f func()) { h.later = append(h.later, f) }
 	n.woke = func(_ int, at time.Time) { h.opened = append(h.opened, at) }
 	n.wokeNow = func(int) { h.at0++ }
+	n.faint = func(_ int, at time.Time) { h.faint = append(h.faint, at) }
 	h.n = n
 	return h
 }
@@ -195,6 +197,32 @@ func TestAWorseClaimDoesNot(t *testing.T) {
 	h.wait(300 * time.Millisecond)
 	if len(h.opened) != 1 {
 		t.Error("a device that heard it worse kept this one from answering")
+	}
+}
+
+func TestOnlyWinningWakeRunsSTTVerification(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		score float64
+		want  int
+	}{
+		{"losing claim", 26, 0},
+		{"winning claim", 12, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHouse(t)
+			verified := 0
+			h.n.WokeVerified(0, h.now, func() { verified++ })
+			if verified != 0 {
+				t.Fatal("verification started before nearest-device selection")
+			}
+			h.claimFrom("Kitchen", tc.score)
+			h.wait(300 * time.Millisecond)
+			if verified != tc.want || len(h.opened) != 0 {
+				t.Fatalf("got %d STT checks and %d direct turns, want %d checks and no direct turn",
+					verified, len(h.opened), tc.want)
+			}
+		})
 	}
 }
 

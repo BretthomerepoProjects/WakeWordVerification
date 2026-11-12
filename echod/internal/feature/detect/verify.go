@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/nearest"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/mic"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
@@ -24,9 +25,28 @@ func (d *Detect) cancelVerification() {
 	}
 }
 
-func (d *Detect) verifyWake(slot int) {
+func (d *Detect) claimVerifiedWake(slot int) {
+	at := time.Now()
 	model, ok := d.engine.Loaded(slot)
 	if !ok || model.Phrase == "" || !voice.Get().CanVerifyWake(slot) {
+		return
+	}
+	samples := mic.Get().Recent(mic.Confirming)
+	if len(samples) == 0 {
+		return
+	}
+	gate, ok := d.contest.wakeHeard(d.engine.Margin(slot), d.commandsListening() > 0)
+	if !ok {
+		return
+	}
+	nearest.Get().WokeVerified(slot, at, func() {
+		gate(func() { d.verifyWake(slot, model.ID, samples) })
+	})
+}
+
+func (d *Detect) verifyWake(slot int, modelID string, samples []int16) {
+	model, ok := d.engine.Loaded(slot)
+	if !ok || model.ID != modelID || model.Phrase == "" || !voice.Get().CanVerifyWake(slot) {
 		return
 	}
 	d.verifyMu.Lock()
@@ -44,10 +64,6 @@ func (d *Detect) verifyWake(slot int) {
 		d.verifyMu.Unlock()
 	}()
 
-	samples := mic.Get().Recent(mic.Confirming)
-	if len(samples) == 0 {
-		return
-	}
 	pcm := make([]byte, 2*len(samples))
 	for i, sample := range samples {
 		binary.LittleEndian.PutUint16(pcm[2*i:], uint16(sample))

@@ -257,7 +257,7 @@ func newDetect() *Detect {
 			slog.Info("wake word during a call ignored, the far end was talking", "slot", slot+1)
 		case routeTurn:
 			if c.Wake.OnHA.VerifySTT {
-				d.verifyWake(slot)
+				d.claimVerifiedWake(slot)
 				return
 			}
 			if h.phase != phone.Idle {

@@ -134,6 +134,55 @@ func TestLibWatchBookKeepsThePlaceWhenPausedAndStopped(t *testing.T) {
 	}
 }
 
+// The first looks can still find what was on before the book: the watch waits for the book rather than
+// ending before it has kept a place.
+func TestLibWatchBookWaitsForTheBookToComeOn(t *testing.T) {
+	f := useFakeSpots(t)
+	firstWas, everyWas, stateWas := libWatchFirst, libWatchEvery, libPlayerState
+	t.Cleanup(func() { libWatchFirst, libWatchEvery, libPlayerState = firstWas, everyWas, stateWas })
+	libWatchFirst, libWatchEvery = time.Millisecond, time.Millisecond
+
+	var mu sync.Mutex
+	before := hass.State{State: "playing", Attributes: map[string]any{"media_position": 30.0, "media_duration": 200.0}}
+	steps := []hass.State{before, before,
+		{State: "paused", Attributes: map[string]any{"media_position": 700.0, "media_duration": 3600.0}},
+	}
+	// The watch's last look is its second with nothing to see: it ends there, so the test waits for it
+	// before the cleanup puts the watch's settings back under it.
+	ended, gone := make(chan struct{}), 0
+	libPlayerState = func(string) (hass.State, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(steps) == 0 {
+			if gone++; gone == 2 {
+				close(ended)
+			}
+			return hass.State{}, errors.New("gone")
+		}
+		s := steps[0]
+		steps = steps[1:]
+		return s, nil
+	}
+	libWatchBook("media_player.x", "library://audiobook/2", 3600)
+	deadline := time.After(2 * time.Second)
+	for {
+		if s, ok := f.get("library://audiobook/2"); ok && s == 700 {
+			select {
+			case <-ended:
+			case <-deadline:
+				t.Fatal("the watch did not end")
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			s, ok := f.get("library://audiobook/2")
+			t.Fatalf("place = %d (%v); want 700, kept once the book came on", s, ok)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 // An audiobook page offers to go on only from a place worth going back to.
 func TestLibResumeOffer(t *testing.T) {
 	f := useFakeSpots(t)
