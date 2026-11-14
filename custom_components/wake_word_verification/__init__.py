@@ -25,16 +25,43 @@ DOMAIN = "wake_word_verification"
 _LOGGER = logging.getLogger(__name__)
 MAX_AUDIO_BYTES = 64000
 
+SATELLITE_SCHEMA = vol.Schema({
+    vol.Required("satellite_ip"): vol.All(cv.string, vol.Coerce(ip_address)),
+    vol.Required("satellite_entity_id"): cv.entity_id,
+    vol.Required("satellite_name"): cv.string,
+})
+
+
+def satellite_map(entries):
+    satellites = {}
+    entity_ids = set()
+    for entry in entries:
+        address = entry["satellite_ip"]
+        entity_id = entry["satellite_entity_id"]
+        if address in satellites or entity_id in entity_ids:
+            raise vol.Invalid("Satellite IP addresses and entity IDs must be unique")
+        satellites[address] = entry
+        entity_ids.add(entity_id)
+    return satellites
+
+
+def validate_satellites(settings):
+    if ("satellites" in settings) == ("satellite_ip" in settings):
+        raise vol.Invalid("Configure one satellite or a satellites list")
+    return settings
+
+
 CONFIG_SCHEMA = vol.Schema({
-    DOMAIN: vol.Schema({
-        vol.Required("satellite_ip"): vol.All(cv.string, vol.Coerce(ip_address)),
-        vol.Required("satellite_entity_id"): cv.entity_id,
-        vol.Required("satellite_name"): cv.string,
+    DOMAIN: vol.All(vol.Schema({
+        vol.Inclusive("satellite_ip", "legacy satellite"): vol.All(cv.string, vol.Coerce(ip_address)),
+        vol.Inclusive("satellite_entity_id", "legacy satellite"): cv.entity_id,
+        vol.Inclusive("satellite_name", "legacy satellite"): cv.string,
+        vol.Optional("satellites"): vol.All([SATELLITE_SCHEMA], vol.Length(min=1), satellite_map),
         vol.Required("phrase"): vol.All(cv.string, vol.Length(min=1, max=80)),
         vol.Required("stt_engine"): cv.string,
         vol.Required("language"): cv.string,
         vol.Required("archive_dir"): cv.string,
-    }),
+    }), validate_satellites),
 }, extra=vol.ALLOW_EXTRA)
 
 
@@ -109,12 +136,15 @@ class VerifyView(HomeAssistantView):
         self.hass = hass
         self.settings = settings
         self.directory = directory
-        self.busy = False
+        self.busy = set()
         self.pending = set()
+        self.satellites = settings.get("satellites") or satellite_map([settings])
 
     async def post(self, request):
         peer = request.transport.get_extra_info("peername") if request.transport else None
-        if not peer or ip_address(peer[0]) != self.settings["satellite_ip"]:
+        address = ip_address(peer[0]) if peer else None
+        satellite = self.satellites.get(address)
+        if satellite is None:
             raise web.HTTPForbidden()
         if request.content_type != "application/octet-stream":
             raise web.HTTPUnsupportedMediaType()
@@ -126,14 +156,14 @@ class VerifyView(HomeAssistantView):
         except (KeyError, ValueError) as err:
             raise web.HTTPBadRequest(text="Invalid wake headers") from err
 
-        if len(self.pending) >= 32:
+        if len(self.pending) + len(self.busy) >= 32:
             _LOGGER.error("Wake archive queue full for event %s", event_id)
             return self.json({"event_id": event_id, "approved": False, "reason": "archive_overload"})
 
         # Bound request bodies and concurrent transcription for the pilot.
-        if self.busy:
+        if address in self.busy or len(self.busy) >= 4:
             raise web.HTTPTooManyRequests()
-        self.busy = True
+        self.busy.add(address)
         try:
             pcm = bytearray()
             try:
@@ -157,8 +187,8 @@ class VerifyView(HomeAssistantView):
             event = {
                 "event_id": event_id,
                 "received_at": received_at,
-                "satellite_entity_id": self.settings["satellite_entity_id"],
-                "satellite_name": self.settings["satellite_name"],
+                "satellite_entity_id": satellite["satellite_entity_id"],
+                "satellite_name": satellite["satellite_name"],
                 "wake_score": wake_score,
                 "clarity_score": clarity_score,
                 "stt_text": text,
@@ -174,7 +204,7 @@ class VerifyView(HomeAssistantView):
             task.add_done_callback(self.pending.discard)
             return self.json({"event_id": event_id, "approved": approved, "reason": reason})
         finally:
-            self.busy = False
+            self.busy.remove(address)
 
     async def save(self, event, clip):
         try:
