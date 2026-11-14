@@ -13,12 +13,22 @@ For a daemon-only change, build the ARM daemon and run `tools/package-wakeword-r
 | Device | Release feed | Rootfs key | Build tags |
 | --- | --- | --- | --- |
 | Echo Spot | [Latest Spot release](https://github.com/BretthomerepoProjects/WakeWordVerification/releases/latest) | `arm-spot` | `spot,wakewordverification` |
-| Echo Show 5 | [Show 5 stable](https://github.com/BretthomerepoProjects/WakeWordVerification/releases/tag/wakeword-show5-stable) | `arm` | `wakewordverification` |
-| Echo Show 8, first generation | [Show 8 stable](https://github.com/BretthomerepoProjects/WakeWordVerification/releases/tag/wakeword-show8-stable) | `arm` | `wakewordverification` |
-| Echo Dot, second generation | [Dot stable](https://github.com/BretthomerepoProjects/WakeWordVerification/releases/tag/wakeword-dot-stable) | `arm-dot` | `dot,wakewordverification` |
+| Echo Show 5 | [Show 5 stable](https://github.com/BretthomerepoProjects/WakeWordVerification/releases/tag/wakeword-show5-stable) | `arm` | `wakewordverification,firmwaremonitoring` |
+| Echo Show 8, first generation | [Show 8 stable](https://github.com/BretthomerepoProjects/WakeWordVerification/releases/tag/wakeword-show8-stable) | `arm` | `wakewordverification,firmwaremonitoring` |
+| Echo Dot, second generation | [Dot stable](https://github.com/BretthomerepoProjects/WakeWordVerification/releases/tag/wakeword-dot-stable) | `arm-dot` | `dot,wakewordverification,firmwaremonitoring` |
 
 The Show 5 and first-generation Show 8 share the `arm` artifact. Each feed carries its own signed manifest. Keep the Spot release marked latest, as its existing builds use GitHub's latest release endpoint.
 
 Use `echod/cmd/mkmanifest` with `-arm-spot` and `-rootfs-arm-spot` to describe the release files. Set `-from` to the versioned GitHub release download URL, and use `-sign-key -` to supply the project seed through stdin from its protected store. Publish the daemon, rootfs, `manifest.json`, and `manifest.json.sig` together. Attach the corresponding third-party sources from the verified base release, including the build instructions and notices, when repackaging upstream binaries. Verify the published manifest and the downloaded rootfs before installing.
 
 The first project build is installed locally on the designated Spot after host verification because the official updater trusts the upstream key. Subsequent builds use the normal manual update flow. To return to official TECHO5, use the authenticated upstream recovery assets and the device's private backups.
+
+## Before publishing
+
+Compare the candidate with the last known-good build for the same board using
+`python3 tools/verify-wakeword-release.py PREVIOUS_ROOTFS PREVIOUS_DAEMON ROOTFS DAEMON`.
+Use the published package and its matching daemon for the baseline. This check
+fails if an image entry, executable permission, or daemon build tag disappears.
+It also requires the monitoring supervisor and both monitoring executables.
+Run the board-tagged monitoring and wake tests. Verify fresh log delivery to
+Chatter and a Prometheus scrape on a pilot device before wider rollout.

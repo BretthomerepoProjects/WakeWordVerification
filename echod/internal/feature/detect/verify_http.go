@@ -36,11 +36,19 @@ func wakeVerifierURL() string {
 	return strings.TrimSpace(string(data))
 }
 
-func askWakeVerifier(ctx context.Context, endpoint string, pcm []byte, score float64) (bool, bool, error) {
+func parseWakeVerifierURL(endpoint string) (*url.URL, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") ||
 		u.User != nil || u.Path != wakeVerifierPath || u.RawQuery != "" || u.Fragment != "" {
-		return false, false, fmt.Errorf("invalid wake verifier URL")
+		return nil, fmt.Errorf("invalid wake verifier URL")
+	}
+	return u, nil
+}
+
+func askWakeVerifier(ctx context.Context, endpoint string, pcm []byte, score float64) (bool, bool, error) {
+	u, err := parseWakeVerifierURL(endpoint)
+	if err != nil {
+		return false, false, err
 	}
 	// The integration requires a UUID. Derive its bytes directly from the OS RNG.
 	var random [16]byte

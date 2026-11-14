@@ -409,7 +409,7 @@ func (d *Detect) Close() error {
 }
 
 // Actions are the wake clips' (clips.go).
-func (d *Detect) Actions() []*esphome.Action { return d.clips.actions() }
+func (d *Detect) Actions() []*esphome.Action { return append(d.clips.actions(), wakeVerifierAction()) }
 
 // load puts one wake word in each slot and reports the ids that came up. Whatever the engine refuses
 // is left out, so Home Assistant reverts that slot rather than showing a wake word the device is not
