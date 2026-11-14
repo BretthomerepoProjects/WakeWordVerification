@@ -227,12 +227,14 @@ type Display struct {
 	dashFollow    bool
 	dashEdge      int // edgeNone, or the edge the finger on it started at
 	dashEdgeAt    image.Point
-	dashAwayUntil time.Time // the idle dashboard put away, the clock up until then
-	dashScroll    int       // how far down the drawn dashboard is scrolled
-	tessPage      int       // the Tessera page's page shown (tessera.go)
-	tessRev       string    // the revision of the Tessera layout it was shown on
-	dashScrollFor string    // the dashboard it is scrolled on
-	dashDrag      drawnDrag // a finger moving on the drawn dashboard
+	dashKbd       dashKeyboard // the keyboard over a streamed page (dash_keyboard.go)
+	dashKbdWake   *time.Timer  // to look again when that keyboard has been left long enough
+	dashAwayUntil time.Time    // the idle dashboard put away, the clock up until then
+	dashScroll    int          // how far down the drawn dashboard is scrolled
+	tessPage      int          // the Tessera page's page shown (tessera.go)
+	tessRev       string       // the revision of the Tessera layout it was shown on
+	dashScrollFor string       // the dashboard it is scrolled on
+	dashDrag      drawnDrag    // a finger moving on the drawn dashboard
 	dashAdjust    dashAdjusting
 	dashColor     *dashboard.LightColor // the color sheet, while it is up
 	dashMedia     *mediaSheet           // the media sheet, while it is up
@@ -328,6 +330,9 @@ type Display struct {
 
 	// camtest is the camera test page (camtest_page.go), while it is up.
 	camtest *camTest
+
+	// qrscan is the QR scan Home Assistant asked for (qrscan_page.go), while it is up.
+	qrscan *qrScan
 
 	// quiet is a turn that was a screen command ("go home", "show the deck"): its words and reply
 	// are not shown, so the screen moves at once. radioCue is when Home Assistant last named a
@@ -450,6 +455,10 @@ type Display struct {
 	// showingLibraryWord is the Now Playing page's Library button as last drawn: its word, or empty
 	// for none.
 	showingLibraryWord string
+	// showingSpoken is an audiobook or a podcast episode on the page or the strip as last drawn, with
+	// back and forward 30 seconds, and showingSpeed the speed button's word.
+	showingSpoken bool
+	showingSpeed  string
 
 	// ringPreview shows the ringing page silently until then.
 	ringPreview time.Time
@@ -1343,6 +1352,15 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
+	// A QR scan takes every finger while it is up; only Cancel means anything.
+	if d.qrScanUp() {
+		if g.Kind == touch.Tap && d.r != nil {
+			d.qrScanTap(g.X, g.Y)
+		}
+		d.wake()
+		return
+	}
+
 	// The camera test takes every finger while it is up; only Back means anything.
 	if d.cameraTestUp() {
 		if g.Kind == touch.Tap && d.r != nil {
@@ -1546,6 +1564,7 @@ func (d *Display) gesture(g touch.Gesture) {
 		d.mu.Lock()
 		showing, away, inStrip, word := d.showingPlaying, d.away, d.showingStrip, d.showingWord
 		modernMusic, libraryWord := d.showingModernMusic, d.showingLibraryWord
+		spokenOn, speedShown := d.showingSpoken, d.showingSpeed
 		d.mu.Unlock()
 		// Only while the word is really drawn, and only when the page is really away: this is the way back
 		// to it, so taking a tap out of the bottom-right corner of the clock is worth it only when there
@@ -1583,6 +1602,10 @@ func (d *Display) gesture(g touch.Gesture) {
 				go d.endMusic()
 			case libraryWord != "" && at.In(d.r.stripLibrary()):
 				d.reopenLibrary()
+			case spokenOn && at.In(back):
+				spokenSkipBy(-spokenSkip)
+			case spokenOn && at.In(next):
+				spokenSkipBy(spokenSkip)
 			case at.In(back):
 				transport(media.TransportPrevious)
 			case at.In(play):
@@ -1612,6 +1635,12 @@ func (d *Display) gesture(g touch.Gesture) {
 					go d.favorite()
 				case libraryWord != "" && at.In(d.r.libraryButton(libraryWord, modernMusic)):
 					d.reopenLibrary()
+				case spokenOn && at.In(d.r.speedButton(speedShown, libraryWord, modernMusic)):
+					d.spokenSpeedUp()
+				case spokenOn && at.In(back):
+					spokenSkipBy(-spokenSkip)
+				case spokenOn && at.In(next):
+					spokenSkipBy(spokenSkip)
 				case at.In(back):
 					transport(media.TransportPrevious)
 				case at.In(next):
@@ -2614,7 +2643,7 @@ func (d *Display) frame() (next time.Duration) {
 		on = lit // the night may have just turned the panel back on: this frame is its first
 	}
 	d.mu.Lock()
-	sheetUp, wifiUp, camUp := d.sheet, d.wifiOpen, d.camtest != nil
+	sheetUp, wifiUp, camUp := d.sheet, d.wifiOpen, d.camtest != nil || d.qrscan != nil
 	updateVisible := d.updateShown(now)
 	d.mu.Unlock()
 	busy := updateVisible || view.Phase != "idle" || call.Phase != phone.Idle || ring.any() || reminding || sheetUp || pinIsOpen() ||
@@ -2624,7 +2653,7 @@ func (d *Display) frame() (next time.Duration) {
 		on = d.on
 		d.mu.Unlock()
 	}
-	if d.awayTick(now, on, busy, night) {
+	if d.awayTick(now, on, busy, view.Phase != "idle", night) {
 		d.mu.Lock()
 		on = d.on
 		d.mu.Unlock()
@@ -2853,6 +2882,7 @@ func (d *Display) frame() (next time.Duration) {
 	s.nightDim = d.nightGlow
 	d.mu.Unlock()
 	s.camtest = d.cameraTestView(now)
+	s.qrscan = d.qrScanView(now)
 	if s.showDrawer && s.drawerTab == drawerCameras {
 		s.cameras = home.Get().Cameras()
 	}
@@ -2882,6 +2912,7 @@ func (d *Display) frame() (next time.Duration) {
 	if s.nowPlaying || s.strip {
 		// The Library button, on the page and in the strip both.
 		s.libraryWord = nowPlayingLibraryWord()
+		s.spoken, s.speed = d.spokenWord(s.radio, s.paused, now)
 	}
 	if s.nowPlaying {
 		s.lyric, s.hasLyric = home.Get().LyricNow(s.radio, now)
@@ -2896,6 +2927,7 @@ func (d *Display) frame() (next time.Duration) {
 	d.showingPlaying, d.showingStrip, d.showingWord = s.nowPlaying, s.strip, playingWord(s) != ""
 	d.showingModernMusic = s.modernMusic
 	d.showingLibraryWord = s.libraryWord
+	d.showingSpoken, d.showingSpeed = s.spoken, speedWord(s.speed)
 	d.mu.Unlock()
 	if s.modernMusic {
 		cover, _ := d.r.modernMusicLayout()

@@ -44,6 +44,8 @@ type meta struct {
 	thumb   *image.RGBA
 	artURL  string
 	artLogo bool // the picture is the station's logo, not a cover
+	// fromEntity is the song (and the picture) taken from the radio's "now" entity, not a service.
+	fromEntity bool
 }
 
 var artClient = &http.Client{Timeout: 10 * time.Second}
@@ -111,8 +113,16 @@ func (f *Feature) refreshMeta(ctx context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	if own, ok := entityNow(station); ok || (cur.fromEntity && cur.station == station && entityNames(station)) {
+		// Once the entity has given this station a song, it stays the station's source while it plays:
+		// a moment between songs with the attributes empty is no song, not a lookup that could bring a
+		// similarly named station's logo.
+		f.refreshFromEntity(ctx, cur, station, own)
+		return
+	}
 	next := cur
-	if cur.station != station {
+	if cur.station != station || cur.fromEntity {
+		// A station that was named by the "now" entity and no longer is, is looked up afresh.
 		next = meta{station: station}
 		st, err := radiometa.Resolve(ctx, station)
 		if err != nil {
@@ -164,6 +174,36 @@ func (f *Feature) refreshMeta(ctx context.Context) {
 	f.mu.Unlock()
 	if changed {
 		slog.Info("radio: now", "station", station, "title", next.now.Title, "artist", next.now.Artist, "art", next.artURL != "")
+		f.showRadio(next)
+		f.Changed.Emit(struct{}{})
+	}
+}
+
+// refreshFromEntity is refreshMeta for a station whose song the "now" entity carries (entityNow). No
+// service is asked: a similar name there could only bring a different station's logo.
+func (f *Feature) refreshFromEntity(ctx context.Context, cur meta, station string, own radiometa.Now) {
+	next := cur
+	if cur.station != station || !cur.fromEntity {
+		// A station that carries its songs plays music: the page draws a song's picture, not talk's.
+		next = meta{station: station, fromEntity: true, st: radiometa.Station{Name: station, Music: true}}
+	}
+	next.now = own
+	if own.Art != next.artURL {
+		img, thumb, err := fetchEntityArt(ctx, own.Art)
+		if err != nil {
+			slog.Debug("radio: the now entity's picture", "err", err)
+			img, thumb = nil, nil
+		}
+		next.art, next.thumb, next.artURL, next.artLogo = img, thumb, own.Art, false
+	}
+	f.mu.Lock()
+	changed := next.now != cur.now || next.artURL != cur.artURL || next.station != cur.station ||
+		next.fromEntity != cur.fromEntity
+	f.meta = next
+	f.mu.Unlock()
+	if changed {
+		slog.Info("radio: now, from the now entity", "station", station, "title", next.now.Title,
+			"artist", next.now.Artist, "art", next.art != nil)
 		f.showRadio(next)
 		f.Changed.Emit(struct{}{})
 	}

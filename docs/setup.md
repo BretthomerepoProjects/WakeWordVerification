@@ -1079,7 +1079,8 @@ device's fonts folder over SSH ([Set the SSH authorized keys](actions.md#set-the
   a device already set up its entity ID still ends in `_presence`, so automations keep working.
   **Screen off when nobody is near** (5 minutes to start with, or Never) puts the screen out once the
   room has been empty that long and lights it again when somebody comes near. Never at night, and never during a conversation,
-  a call, an alarm or with the settings open. Nothing the camera sees is kept or sent: a couple of
+  a call, an alarm or with the settings open. The wake word lights it too, even when the camera can't
+  see who said it, and it goes out again after the same wait once nobody is seen. Nothing the camera sees is kept or sent: a couple of
   times a second the newest frame is compared with the last as a small grid of brightness, on the
   device. The mute button and the lens shutter stop it, and then the screen is left as it is. On a
   Show 8 or 1st gen Show 5 with a boot image older than v1.0.1, a quick tap of the mute button to
@@ -2307,6 +2308,10 @@ the middle LED pulses amber), and choose **Pair the clock** on the setup page, o
 wall clock** button in Home Assistant. The device
 looks for a clock for two minutes, pairs with it, trusts it and remembers its address; the **Wall
 clock status** sensor says what it is doing, from Connecting to Connected or Waiting for the clock.
+A clock that cannot be reached is retried less and less often — ten seconds, then twenty, doubling
+to fifteen minutes — so a clock that is out of range, or out of batteries, is not paged thousands of
+times a day and is not kept awake by the attempts. It reconnects on its own within about fifteen minutes
+of coming back, and turning **Wall clock** off and on, or pairing, tries again at once.
 A clock that was paired to an Echo must be unpaired from Alexa first, since it stays paired to one
 controller. If you know the clock's address, type it under **Clock address** instead and Save.
 

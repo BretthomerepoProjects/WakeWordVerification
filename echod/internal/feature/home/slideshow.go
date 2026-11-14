@@ -805,10 +805,34 @@ func (f *Feature) BrowseFolder(ctx context.Context, id string) (hass.Media, erro
 			Children: []hass.Media{{ID: ImmichAll, Title: "Immich", CanExpand: true}}}, nil
 	}
 	m, err := hass.Get().Browse(ctx, id)
+	if err == nil && id == mediaRoot {
+		// Home Assistant's own Immich integration is a media source beside My media, not inside it, so
+		// the top of the list offers it as a folder of its own (#523). Without it, or when Home
+		// Assistant's list of sources can't be had, the list is as it was.
+		if all, err := hass.Get().Browse(ctx, "media-source://"); err == nil {
+			m.Children = append(photoSources(all), m.Children...)
+		}
+	}
 	if err == nil && immich {
 		m.Children = append([]hass.Media{{ID: ImmichAll, Title: "Immich", CanExpand: true}}, m.Children...)
 	}
 	return m, err
+}
+
+// photoSources are the media sources from Home Assistant's top level that hold photos and are not My
+// media itself, which the list already is: its Immich integration's. Cameras, text to speech and
+// radio are left out.
+func photoSources(top hass.Media) []hass.Media {
+	var out []hass.Media
+	for _, c := range top.Children {
+		if c.CanExpand && (c.ID == "media-source://immich" || strings.HasPrefix(c.ID, "media-source://immich/")) {
+			if c.Title == "" || c.Title == "Immich" {
+				c.Title = "Immich (Home Assistant)" // beside the device's own Immich folder, if that is set up too
+			}
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // slideshowLoop advances the slideshow while Background mode is on. Run from Feature.Run.
@@ -1234,7 +1258,7 @@ func gatherSlideshow(h config.Slideshow) ([]hass.Media, error) {
 	var photos []hass.Media
 	err := hass.Get().BrowseTree(ctx, h.Source, folders, func(m hass.Media) bool {
 		for _, c := range m.Children {
-			if c.CanPlay && isPhoto(c) {
+			if SlideshowPhoto(c) {
 				photos = append(photos, c)
 			}
 		}
@@ -1243,7 +1267,26 @@ func gatherSlideshow(h config.Slideshow) ([]hass.Media, error) {
 	return photos, err
 }
 
-// isPhoto is whether a playable entry is a picture the device can show, going by the type Home
+// SlideshowPhoto is whether a folder's entry is a photo the slideshow shows. Whether Home Assistant
+// calls it playable is not asked: its Immich source marks every photo can_play false, only so that its
+// own media browser draws no play button over a picture (#523). Not being a folder, and being a
+// picture by its type or name, is what counts.
+//
+// That source names each picture by the type it was taken in, but serves Immich's own rendering of it:
+// a DNG from it comes as a JPEG and is shown like any other (#530). Any picture of it is let through,
+// and one that comes as something the device can't decode fails to fetch, so the slideshow goes on to
+// the next.
+func SlideshowPhoto(m hass.Media) bool {
+	if m.CanExpand {
+		return false
+	}
+	if strings.HasPrefix(m.ID, "media-source://immich/") && strings.HasPrefix(strings.ToLower(m.Kind), "image/") {
+		return true
+	}
+	return isPhoto(m)
+}
+
+// isPhoto is whether an entry is a picture the device can show, going by the type Home
 // Assistant gives it, or failing that its name. Only JPEG and PNG: those are the decoders built in,
 // and a GIF or a WebP would only be fetched to be skipped.
 func isPhoto(m hass.Media) bool {
