@@ -35,16 +35,17 @@ func (d *Detect) claimVerifiedWake(slot int) {
 	if len(samples) == 0 {
 		return
 	}
+	score := d.engine.Crossing(slot)
 	gate, ok := d.contest.wakeHeard(d.engine.Margin(slot), d.commandsListening() > 0)
 	if !ok {
 		return
 	}
 	nearest.Get().WokeVerified(slot, at, func() {
-		gate(func() { d.verifyWake(slot, model.ID, samples) })
+		gate(func() { d.verifyWake(slot, model.ID, samples, score) })
 	})
 }
 
-func (d *Detect) verifyWake(slot int, modelID string, samples []int16) {
+func (d *Detect) verifyWake(slot int, modelID string, samples []int16, score float64) {
 	model, ok := d.engine.Loaded(slot)
 	if !ok || model.ID != modelID || model.Phrase == "" || !voice.Get().CanVerifyWake(slot) {
 		return
@@ -68,21 +69,9 @@ func (d *Detect) verifyWake(slot int, modelID string, samples []int16) {
 	for i, sample := range samples {
 		binary.LittleEndian.PutUint16(pcm[2*i:], uint16(sample))
 	}
-	mac, err := layout.FactoryMAC()
-	if err != nil {
-		slog.Debug("wake verification could not identify the satellite", "err", err)
-		return
-	}
 	check, stop := context.WithTimeout(ctx, 3*time.Second)
 	defer stop()
-	pipeline, err := hass.Get().WakePipeline(check, mac, slot)
-	if err != nil {
-		slog.Debug("wake verification could not resolve the Assist pipeline", "err", err)
-		return
-	}
-	transcript, sent, err := hass.Get().Transcribe(check, pipeline, mic.Rate, pcm)
-	allowed := err == nil && matchesWakePhrase(transcript, model.Phrase)
-	blocked := err == nil && !allowed || errors.Is(err, hass.ErrSTTNoText)
+	allowed, blocked, sent, err := verifyCandidate(check, slot, model.Phrase, pcm, score)
 	if sent {
 		// Persist after the wake handoff so writing the totals cannot delay the chime.
 		defer func() {
@@ -119,5 +108,28 @@ func matchesWakePhrase(transcript, phrase string) bool {
 		return strings.Join(words, " ")
 	}
 	want := normalize(phrase)
-	return want != "" && strings.Contains(" "+normalize(transcript)+" ", " "+want+" ")
+	heard := " " + normalize(transcript) + " "
+	if want == "okay nabu" || want == "ok nabu" {
+		return strings.Contains(heard, " okay nabu ") || strings.Contains(heard, " ok nabu ")
+	}
+	return want != "" && strings.Contains(heard, " "+want+" ")
+}
+
+func verifyCandidate(ctx context.Context, slot int, phrase string, pcm []byte, score float64) (allowed, blocked, sent bool, err error) {
+	if endpoint := wakeVerifierURL(); endpoint != "" {
+		allowed, sent, err = askWakeVerifier(ctx, endpoint, pcm, score)
+		return allowed, err == nil && !allowed, sent, err
+	}
+	mac, err := layout.FactoryMAC()
+	if err != nil {
+		return false, false, false, err
+	}
+	pipeline, err := hass.Get().WakePipeline(ctx, mac, slot)
+	if err != nil {
+		return false, false, false, err
+	}
+	transcript, sent, err := hass.Get().Transcribe(ctx, pipeline, mic.Rate, pcm)
+	allowed = err == nil && matchesWakePhrase(transcript, phrase)
+	blocked = err == nil && !allowed || errors.Is(err, hass.ErrSTTNoText)
+	return
 }

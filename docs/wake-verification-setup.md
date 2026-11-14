@@ -36,3 +36,16 @@ Open the satellite's device page under **Settings → Devices & services → ESP
 Firmware with the setup check refuses to enable verification until the satellite has a saved Home Assistant URL and token. If the ESPHome integration allows the device to perform Home Assistant actions, the satellite also sends a Home Assistant notification with a link to this guide.
 
 To receive the notification, open **Settings → Devices & services → ESPHome**, select **Configure** for the satellite, and enable **Allow the device to perform Home Assistant actions**. The switch still refuses to turn on when credentials are missing even if notifications are disabled.
+
+## Home Assistant decision listener pilot
+
+On the selected Spot, save the direct Home Assistant URL ending in
+`/api/wake_word_verification/v1/verify` as one line in
+`/data/misc/techo5/wake-verifier-url`. Use the address reachable directly
+from the Spot, and add the Spot's reserved IP to the HACS integration.
+Enable Always Verify with STT. The Spot sends no token to this endpoint.
+The integration's configured phrase must match the Spot's active wake
+phrase. A missing file selects the existing Assist STT verifier. A present
+but invalid endpoint fails closed. Only the satellite selected by
+nearest-device arbitration sends the clip. Clarity is omitted because
+this integration version expects a normalized value.
